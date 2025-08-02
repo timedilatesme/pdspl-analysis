@@ -1,7 +1,9 @@
 import numpy as np
-from astropy.cosmology import FlatwCDM
+from astropy.cosmology import Flatw0waCDM
 from astropy.cosmology import Cosmology
 import astropy.units as u
+import emcee
+from multiprocessing import Pool, cpu_count
 
 
 def beta_double_source_plane(z_lens, z_source_1, z_source_2, cosmo: Cosmology):
@@ -47,14 +49,14 @@ def log_likelihood(theta, zd_arr, zs1_arr, zs2_arr, beta_E_obs_arr, beta_E_obs_e
                    normalized=True):
     """
     Calculates the vectorized log-likelihood for the entire dataset.
-    theta: Model parameters [Omega_m, w, lambda_MST, gamma_pl]
+    theta: Model parameters [Omega_m, w0, wa, lambda_MST, gamma_pl]
     zd_arr, zs1_arr, zs2_arr: Arrays of redshifts for deflector, source1, source2
     beta_E_obs_arr: Array of observed beta_E values
     beta_E_obs_err_arr: Array of errors on observed beta_E values
     H0: Hubble constant, default is 70.0 km/s/Mpc
     """
 
-    Omega_m, w, lambda_MST, gamma_pl = theta
+    Omega_m, w0, wa, lambda_MST, gamma_pl = theta
 
     # check gamma_pl != 1 to avoid division by zero
     if np.isclose(gamma_pl, 1):
@@ -62,7 +64,7 @@ def log_likelihood(theta, zd_arr, zs1_arr, zs2_arr, beta_E_obs_arr, beta_E_obs_e
 
     try:
         # 1. Create cosmology object ONCE per theta evaluation
-        cosmo = FlatwCDM(H0=H0 * u.km / u.s / u.Mpc, Om0=Omega_m, w0=w)
+        cosmo = Flatw0waCDM(H0=H0 * u.km / u.s / u.Mpc, Om0=Omega_m, w0=w0, wa=wa)
 
         # 2. beta_dspl calculation
         beta_arr = beta_double_source_plane(zd_arr, zs1_arr, zs2_arr, cosmo)
@@ -87,15 +89,16 @@ def log_likelihood(theta, zd_arr, zs1_arr, zs2_arr, beta_E_obs_arr, beta_E_obs_e
 def log_prior(theta):
     """
     Calculates the log-prior for the parameters.
-    theta: Model parameters [Omega_m, w, lambda_MST, gamma_pl]
+    theta: Model parameters [Omega_m, w0, wa, lambda_MST, gamma_pl]
     """
-    Omega_m, w, lambda_MST, gamma_pl = theta
+    Omega_m, w0, wa, lambda_MST, gamma_pl = theta
 
     # Define flat priors (log prior = 0 if in range, -inf otherwise)
-    if (0 < Omega_m < 1.0 and   # Omega_m
-        -2.0 < w < 0 and        # w (dark energy equation of state)
-        0.0 < lambda_MST < 2.0 and # lambda_MST (model specific)
-        1 < gamma_pl < 3):    # gamma_pl (model specific, >1 to avoid issues)
+    if (0 < Omega_m < 1.0 and           # Omega_m
+        -2.0 < w0 < 0 and               # w0 (present-day dark energy equation of state)
+        -3.0 < wa < 3.0 and             # wa (time evolution of dark energy equation of state)
+        0.0 < lambda_MST < 2.0 and      # lambda_MST (model specific)
+        1 < gamma_pl < 3):              # gamma_pl (model specific, >1 to avoid issues)
         return 0.0
     return -np.inf
 
@@ -103,6 +106,7 @@ def log_prior(theta):
 def log_probability(theta, zd_arr, zs1_arr, zs2_arr, beta_E_obs_arr, beta_E_err_arr):
     """
     Calculates the total log-posterior probability.
+    theta: Model parameters [Omega_m, w0, wa, lambda_MST, gamma_pl]
     """
     lp = log_prior(theta)
     if not np.isfinite(lp):
@@ -116,3 +120,67 @@ def log_probability(theta, zd_arr, zs1_arr, zs2_arr, beta_E_obs_arr, beta_E_err_
         return -np.inf
         
     return lp + ll
+
+def run_mcmc_analysis(z_lens_arr, z1_arr, z2_arr, beta_E_obs_arr, beta_E_obs_err_arr,
+                      kwargs_means=None, kwargs_spreads=None, , nwalkers=400, nsteps=1000):
+    """Run MCMC analysis on the data.
+    
+    :param z_lens_arr: Array of lens redshifts
+    :param z1_arr: Array of source1 redshifts
+    :param z2_arr: Array of source2 redshifts
+    :param beta_E_obs_arr: Array of observed beta_E values
+    :param beta_E_obs_err_arr: Array of errors on observed beta_E values
+    :param kwargs_means: Dictionary of means for initial walker positions. Must contain keys:
+        'Omega_m', 'w0', 'wa', 'lambda_MST', 'gamma_pl'
+    :param kwargs_spreads: Dictionary of spreads for initial walker positions. Must contain keys:
+        'Omega_m', 'w0', 'wa', 'lambda_MST', 'gamma_pl'
+    :param nwalkers: Number of walkers (default is 400)
+    :param nsteps: Number of steps to run (default is 1000)
+    :return: MCMC sampler object
+    """
+    
+    # Initialize Walkers [PARAMS: Omega_m, w0, wa, lambda_MST, gamma_pl]
+    # initial_guess_means = np.array([0.3, -1.0, 0.0, 1.0, 2.0])
+    # initial_spreads = np.array([0.05, 0.2, 0.3, 0.01, 0.01])
+    if kwargs_means is None:
+        initial_guess_means = np.array([0.3, -1.0, 0.0, 1.0, 2.0])
+    else:
+        initial_guess_means = np.array([kwargs_means['Omega_m'], kwargs_means['w0'], 
+                                        kwargs_means['wa'], kwargs_means['lambda_MST'], 
+                                        kwargs_means['gamma_pl']])
+    if kwargs_spreads is None:
+        initial_spreads = np.array([0.05, 0.2, 0.3, 0.01, 0.01])
+    else:
+        initial_spreads = np.array([kwargs_spreads['Omega_m'], kwargs_spreads['w0'], 
+                                    kwargs_spreads['wa'], kwargs_spreads['lambda_MST'], 
+                                    kwargs_spreads['gamma_pl']])
+    
+    ndim = len(initial_guess_means)  # Number of parameters
+
+    pos_initial = np.zeros((nwalkers, ndim))
+    for i in range(nwalkers):
+        while True:
+            p = initial_guess_means + initial_spreads * np.random.randn(ndim)
+            if np.isfinite(log_prior(p)):
+                if np.all(np.isfinite(log_likelihood(p, z_lens_arr, z1_arr, z2_arr, beta_E_obs_arr, beta_E_obs_err_arr))):
+                    pos_initial[i,:] = p
+                    break
+    
+    # Run MCMC
+    sampler_args = (z_lens_arr, z1_arr, z2_arr, beta_E_obs_arr, beta_E_obs_err_arr)
+    
+    with Pool(processes=cpu_count()) as pool:
+        sampler = emcee.EnsembleSampler(
+            nwalkers,
+            ndim,
+            log_probability,
+            args=sampler_args,
+            pool=pool
+        )
+
+        print(f"Starting MCMC run: {nwalkers} walkers, {nsteps} steps, {cpu_count()} cores...")
+        print(f"Parameters: Omega_m, w0, wa, lambda_MST, gamma_pl")
+        sampler.run_mcmc(pos_initial, nsteps, progress=True)
+        print("MCMC run finished!")
+    
+    return sampler
