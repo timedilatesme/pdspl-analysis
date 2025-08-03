@@ -122,7 +122,7 @@ def log_probability(theta, zd_arr, zs1_arr, zs2_arr, beta_E_obs_arr, beta_E_err_
     return lp + ll
 
 def run_mcmc_analysis(z_lens_arr, z1_arr, z2_arr, beta_E_obs_arr, beta_E_obs_err_arr,
-                      kwargs_means=None, kwargs_spreads=None, , nwalkers=400, nsteps=1000):
+                      kwargs_means=None, kwargs_spreads=None, nwalkers=400, nsteps=1000):
     """Run MCMC analysis on the data.
     
     :param z_lens_arr: Array of lens redshifts
