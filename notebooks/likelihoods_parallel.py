@@ -86,6 +86,33 @@ def log_likelihood(theta, zd_arr, zs1_arr, zs2_arr, beta_E_obs_arr, beta_E_obs_e
         # print(f"Warning: Log-likelihood calculation error for theta={theta}: {e}") # For debugging
         return -np.inf
 
+def reduced_chi_squared(theta, zd_arr, zs1_arr, zs2_arr, beta_E_obs_arr, beta_E_obs_err_arr, H0=70.0):
+    """
+    Calculates the reduced chi-squared statistic for the model.
+    theta: Model parameters [Omega_m, w0, wa, lambda_MST, gamma_pl]
+    zd_arr, zs1_arr, zs2_arr: Arrays of redshifts for deflector, source1, source2
+    beta_E_obs_arr: Array of observed beta_E values
+    beta_E_obs_err_arr: Array of errors on observed beta_E values
+    H0: Hubble constant, default is 70.0 km/s/Mpc
+    """
+    log_l = log_likelihood(theta, zd_arr, zs1_arr, zs2_arr, beta_E_obs_arr, beta_E_obs_err_arr, H0=H0)
+    
+    if not np.isfinite(log_l):
+        return -np.inf
+    
+    # Number of data points
+    n_data = len(beta_E_obs_arr)
+
+    # number of parameters
+    n_params = len(theta)
+
+    n_dof = n_data - n_params  # degrees of freedom
+    
+    # Reduced chi-squared
+    chi2_reduced = -2 * log_l / n_dof if n_dof > 0 else -np.inf
+
+    return chi2_reduced
+
 def log_prior(theta):
     """
     Calculates the log-prior for the parameters.
