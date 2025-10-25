@@ -6,7 +6,9 @@ from itertools import combinations
 # from lenstronomy.LensModel.lens_model import LensModel
 from scipy import spatial
 
-
+#############################################################################
+# PDSPL UTILITIES
+#############################################################################
 def beta_double_source_plane(z_lens, z_source_1, z_source_2, cosmo):
     """Model prediction of ratio of scaled deflection angles.
 
@@ -82,6 +84,7 @@ def draw_lens_from_given_zs(z_lens, z1, z2,
         "likelihood_type": "DSPL",
     }
     return kwargs_likelihood
+#############################################################################
 
 #############################################################################
 # PLANE FITTING AND SCATTER
@@ -187,12 +190,13 @@ def kdtree_matching_n_dim(points, n_neighbors=2, unique_pairs=True):
     tree = spatial.KDTree(points)
     distances, indices = tree.query(points, k=n_neighbors)
 
+    distances = distances[:,1] # exclude self-distance (0th column)
+
     if unique_pairs:
         # Sort each pair to ensure (i, j) and (j, i) are treated the same
         for i in range(indices.shape[0]):
             if indices[i][0] > indices[i][1]:
                 indices[i] = indices[i][::-1] # reverse the order
-                distances[i] = distances[i][::-1]
         
         # only return unique pairs
         indices, unique_pairs_idxs = np.unique(indices, axis=0, return_index=True)
@@ -230,6 +234,14 @@ def get_pairs_table_PDSPL(data_table, pair_indices, cosmo, progress_bar=True):
         "R_e_D2": [],
         "Sigma_half_Msun/pc2_D1": [],
         "Sigma_half_Msun/pc2_D2": [],
+        "gamma_pl_1": [],
+        "gamma_pl_2": [],
+        "color_D_gr_1": [],
+        "color_D_gr_2": [],
+        "color_D_ri_1": [],
+        "color_D_ri_2": [],
+        "mag_D_i_1": [],
+        "mag_D_i_2": [],
     }
     if progress_bar:
         iterator = tqdm(enumerate(pair_indices), total=len(pair_indices), desc="Processing pairs")
@@ -253,6 +265,8 @@ def get_pairs_table_PDSPL(data_table, pair_indices, cosmo, progress_bar=True):
         pairs_table["Sigma_half_Msun/pc2_D1"].append(data_table[idx1]["Sigma_half_Msun/pc2"])
         pairs_table["Sigma_half_Msun/pc2_D2"].append(data_table[idx2]["Sigma_half_Msun/pc2"])
         pairs_table["beta_E_pseudo"].append(data_table[idx1]["theta_E"] / data_table[idx2]["theta_E"])
+        pairs_table["gamma_pl_1"].append(data_table[idx1]["gamma_pl"])
+        pairs_table["gamma_pl_2"].append(data_table[idx2]["gamma_pl"])
 
         # calculate beta_E_DSPL
         _beta_E_DSPL = beta_double_source_plane(
@@ -263,7 +277,19 @@ def get_pairs_table_PDSPL(data_table, pair_indices, cosmo, progress_bar=True):
         )
         beta_E_DSPL = beta2theta_e_ratio(_beta_E_DSPL, gamma_pl= 2, lambda_mst=1)
         pairs_table["beta_E_DSPL"].append(beta_E_DSPL)
-        
+
+        # add color_D_gr and color_D_ri
+        color_D_gr_1 = data_table[idx1]['mag_D_g'] - data_table[idx1]['mag_D_r']
+        color_D_gr_2 = data_table[idx2]['mag_D_g'] - data_table[idx2]['mag_D_r']
+        color_D_ri_1 = data_table[idx1]['mag_D_r'] - data_table[idx1]['mag_D_i']
+        color_D_ri_2 = data_table[idx2]['mag_D_r'] - data_table[idx2]['mag_D_i']
+        pairs_table["color_D_gr_1"].append(color_D_gr_1)
+        pairs_table["color_D_gr_2"].append(color_D_gr_2)
+        pairs_table["color_D_ri_1"].append(color_D_ri_1)
+        pairs_table["color_D_ri_2"].append(color_D_ri_2)
+
+        pairs_table["mag_D_i_1"].append(data_table[idx1]['mag_D_i'])
+        pairs_table["mag_D_i_2"].append(data_table[idx2]['mag_D_i'])
 
     # make it an astropy table
     pairs_table = Table(pairs_table)
@@ -282,8 +308,18 @@ def get_pairs_table_PDSPL(data_table, pair_indices, cosmo, progress_bar=True):
     # add a column for the rel difference between Sigma_half of the two lenses
     pairs_table["rel_diff_Sigma_half"] = 2*(pairs_table["Sigma_half_Msun/pc2_D2"] - pairs_table["Sigma_half_Msun/pc2_D1"]) / (pairs_table["Sigma_half_Msun/pc2_D2"] + pairs_table["Sigma_half_Msun/pc2_D1"])
 
+    # add a column for i band magnitude difference between the two lenses
+    pairs_table['rel_diff_mag_D_i'] = 2*(pairs_table['mag_D_i_2'] - pairs_table['mag_D_i_1']) / (pairs_table['mag_D_i_2'] + pairs_table['mag_D_i_1'])
+
+    # relative difference in colors between the two deflectors
+    pairs_table['rel_diff_color_D_gr'] = 2*(pairs_table['color_D_gr_2'] - pairs_table['color_D_gr_1']) / (pairs_table['color_D_gr_2'] + pairs_table['color_D_gr_1'])
+    pairs_table['rel_diff_color_D_ri'] = 2*(pairs_table['color_D_ri_2'] - pairs_table['color_D_ri_1']) / (pairs_table['color_D_ri_2'] + pairs_table['color_D_ri_1'])
+
     # add a column for the rel difference between z_D of the two lenses
     pairs_table["rel_diff_z_D"] = 2*(pairs_table["z_D2"] - pairs_table["z_D1"]) / (pairs_table["z_D2"] + pairs_table["z_D1"])
+
+    # add a column for the rel difference between gamma_pl of the two lenses
+    pairs_table["rel_diff_gamma_pl"] = 2*(pairs_table["gamma_pl_2"] - pairs_table["gamma_pl_1"]) / (pairs_table["gamma_pl_2"] + pairs_table["gamma_pl_1"])
 
     return pairs_table
 #############################################################################
