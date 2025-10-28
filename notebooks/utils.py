@@ -53,11 +53,10 @@ def draw_lens_from_given_zs(z_lens, z1, z2,
     :param gamma_pl_mean: mean value of the power-law slope of the lensing potential
     :param gamma_pl_sigma: standard deviation of the power-law slope of the lensing potential
     :param sigma_beta: relative precision on Einstein radius, used to compute the noise on the measured beta
-    
-    :param with_noise: if True, add noise to the measured beta
     :param down_sampling: downsampling factor, noise will be reduced by sqrt(down_sampling)
+    :param with_noise: if True, add noise to the measured beta 
     """
-    beta = beta_double_source_plane(z_lens, z1, z2, cosmo)
+    beta = beta_double_source_plane(z_lens, z1, z2, cosmo=cosmo)
     
     beta_e_list = []
     beta_e_mean = beta2theta_e_ratio(beta_dsp=beta, gamma_pl=gamma_pl_mean, lambda_mst=lambda_mst_mean)
