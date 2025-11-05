@@ -19,9 +19,9 @@ def beta_double_source_plane(z_lens, z_source_1, z_source_2, cosmo):
     :return: beta
     """
     ds1 = cosmo.angular_diameter_distance(z_source_1).value
-    dds1 = cosmo.angular_diameter_distance_z1z2(z1=z_lens, z2=z_source_1).value
+    dds1 = cosmo.angular_diameter_distance_z1z2(z_lens, z_source_1).value
     ds2 = cosmo.angular_diameter_distance(z_source_2).value
-    dds2 = cosmo.angular_diameter_distance_z1z2(z1=z_lens, z2=z_source_2).value
+    dds2 = cosmo.angular_diameter_distance_z1z2(z_lens, z_source_2).value
     beta = dds1 / ds1 * ds2 / dds2
     return beta
 
@@ -175,7 +175,7 @@ def kdtree_matching_n_dim(points, n_neighbors=2, unique_pairs=True):
     points : array-like, shape (n_samples, n_features)
         The input points to build the KDTree.
     n_neighbors : int, optional
-        The number of nearest neighbors to find. Default is 2.
+        The number of nearest neighbors to find. Default is 2. Note that if it is set to 1, the self-match will be returned.
     unique_pairs : bool, optional
         If True, only unique pairs are returned. Default is True.
 
@@ -229,8 +229,10 @@ def get_pairs_table_PDSPL(data_table, pair_indices, cosmo, progress_bar=True):
         "beta_E_pseudo": [],
         "sigma_v_D1": [],
         "sigma_v_D2": [],
-        "R_e_D1": [],
-        "R_e_D2": [],
+        "R_e_kpc_D1": [],
+        "R_e_kpc_D2": [],
+        "R_e_arcsec_D1": [],
+        "R_e_arcsec_D2": [],
         "Sigma_half_Msun/pc2_D1": [],
         "Sigma_half_Msun/pc2_D2": [],
         "gamma_pl_1": [],
@@ -259,8 +261,10 @@ def get_pairs_table_PDSPL(data_table, pair_indices, cosmo, progress_bar=True):
         pairs_table["theta_E2"].append(data_table[idx2]["theta_E"])
         pairs_table["sigma_v_D1"].append(data_table[idx1]["sigma_v_D"])
         pairs_table["sigma_v_D2"].append(data_table[idx2]["sigma_v_D"])
-        pairs_table["R_e_D1"].append(data_table[idx1]["R_e_kpc"])
-        pairs_table["R_e_D2"].append(data_table[idx2]["R_e_kpc"])
+        pairs_table["R_e_kpc_D1"].append(data_table[idx1]["R_e_kpc"])
+        pairs_table["R_e_kpc_D2"].append(data_table[idx2]["R_e_kpc"])
+        pairs_table["R_e_arcsec_D1"].append(data_table[idx1]["R_e_arcsec"])
+        pairs_table["R_e_arcsec_D2"].append(data_table[idx2]["R_e_arcsec"])
         pairs_table["Sigma_half_Msun/pc2_D1"].append(data_table[idx1]["Sigma_half_Msun/pc2"])
         pairs_table["Sigma_half_Msun/pc2_D2"].append(data_table[idx2]["Sigma_half_Msun/pc2"])
         pairs_table["beta_E_pseudo"].append(data_table[idx1]["theta_E"] / data_table[idx2]["theta_E"])
@@ -268,14 +272,21 @@ def get_pairs_table_PDSPL(data_table, pair_indices, cosmo, progress_bar=True):
         pairs_table["gamma_pl_2"].append(data_table[idx2]["gamma_pl"])
 
         # calculate beta_E_DSPL
-        _beta_E_DSPL = beta_double_source_plane(
-            z_lens = 0.5 * (data_table[idx1]["z_D"] + data_table[idx2]["z_D"]),
+        _beta_E_DSPL_D1 = beta_double_source_plane(
+            z_lens = data_table[idx1]["z_D"],
             z_source_1 = data_table[idx1]["z_S"],
             z_source_2 = data_table[idx2]["z_S"],
             cosmo = cosmo,
         )
-        beta_E_DSPL = beta2theta_e_ratio(_beta_E_DSPL, gamma_pl= 2, lambda_mst=1)
-        pairs_table["beta_E_DSPL"].append(beta_E_DSPL)
+        _beta_E_DSPL_D2 = beta_double_source_plane(
+            z_lens = data_table[idx2]["z_D"],
+            z_source_1 = data_table[idx1]["z_S"],
+            z_source_2 = data_table[idx2]["z_S"],
+            cosmo = cosmo,
+        )
+        beta_E_DSPL_D1 = beta2theta_e_ratio(_beta_E_DSPL_D1, gamma_pl=data_table[idx1]["gamma_pl"], lambda_mst=1)
+        beta_E_DSPL_D2 = beta2theta_e_ratio(_beta_E_DSPL_D2, gamma_pl=data_table[idx2]["gamma_pl"], lambda_mst=1)
+        pairs_table["beta_E_DSPL"].append(0.5 * (beta_E_DSPL_D1 + beta_E_DSPL_D2))
 
         # add color_D_gr and color_D_ri
         color_D_gr_1 = data_table[idx1]['mag_D_g'] - data_table[idx1]['mag_D_r']
@@ -302,7 +313,8 @@ def get_pairs_table_PDSPL(data_table, pair_indices, cosmo, progress_bar=True):
     pairs_table["rel_diff_sigma_v_D"] = 2*(pairs_table["sigma_v_D2"] - pairs_table["sigma_v_D1"]) / (pairs_table["sigma_v_D2"] + pairs_table["sigma_v_D1"])
 
     # add a column for the rel difference between R_e of the two lenses
-    pairs_table["rel_diff_R_e"] = 2*(pairs_table["R_e_D2"] - pairs_table["R_e_D1"]) / (pairs_table["R_e_D2"] + pairs_table["R_e_D1"])
+    pairs_table["rel_diff_R_e_kpc"] = 2*(pairs_table["R_e_kpc_D2"] - pairs_table["R_e_kpc_D1"]) / (pairs_table["R_e_kpc_D2"] + pairs_table["R_e_kpc_D1"])
+    pairs_table["rel_diff_R_e_arcsec"] = 2*(pairs_table["R_e_arcsec_D2"] - pairs_table["R_e_arcsec_D1"]) / (pairs_table["R_e_arcsec_D2"] + pairs_table["R_e_arcsec_D1"])
 
     # add a column for the rel difference between Sigma_half of the two lenses
     pairs_table["rel_diff_Sigma_half"] = 2*(pairs_table["Sigma_half_Msun/pc2_D2"] - pairs_table["Sigma_half_Msun/pc2_D1"]) / (pairs_table["Sigma_half_Msun/pc2_D2"] + pairs_table["Sigma_half_Msun/pc2_D1"])
