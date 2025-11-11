@@ -244,12 +244,28 @@ def get_pairs_table_PDSPL(data_table, pair_indices, cosmo, progress_bar=True):
         "mag_D_i_1": [],
         "mag_D_i_2": [],
     }
+
+    if "err_z_D" in data_table.colnames:
+        pairs_table["err_z_D1"] = []
+        pairs_table["err_z_D2"] = []
+    if "err_sigma_v_D" in data_table.colnames:
+        pairs_table["err_sigma_v_D1"] = []
+        pairs_table["err_sigma_v_D2"] = []
+    if "err_R_e_arcsec" in data_table.colnames:
+        pairs_table["err_R_e_arcsec_D1"] = []
+        pairs_table["err_R_e_arcsec_D2"] = []
+
     if progress_bar:
         iterator = tqdm(enumerate(pair_indices), total=len(pair_indices), desc="Processing pairs")
     else:
         iterator = enumerate(pair_indices)
 
     for i, (idx1, idx2) in iterator:
+
+        # z_S1 should be less than z_S2
+        if data_table[idx1]["z_S"] > data_table[idx2]["z_S"]:
+            idx1, idx2 = idx2, idx1
+
         pairs_table["index_1"].append(idx1)
         pairs_table["index_2"].append(idx2)
         pairs_table["z_D1"].append(data_table[idx1]["z_D"])
@@ -270,6 +286,17 @@ def get_pairs_table_PDSPL(data_table, pair_indices, cosmo, progress_bar=True):
         pairs_table["beta_E_pseudo"].append(data_table[idx1]["theta_E"] / data_table[idx2]["theta_E"])
         pairs_table["gamma_pl_1"].append(data_table[idx1]["gamma_pl"])
         pairs_table["gamma_pl_2"].append(data_table[idx2]["gamma_pl"])
+
+        # errors on z_D, sigma_v_D, R_e_arcsec
+        if "err_z_D" in data_table.colnames:
+            pairs_table["err_z_D1"].append(data_table[idx1]["err_z_D"])
+            pairs_table["err_z_D2"].append(data_table[idx2]["err_z_D"])
+        if "err_sigma_v_D" in data_table.colnames:
+            pairs_table["err_sigma_v_D1"].append(data_table[idx1]["err_sigma_v_D"])
+            pairs_table["err_sigma_v_D2"].append(data_table[idx2]["err_sigma_v_D"])
+        if "err_R_e_arcsec" in data_table.colnames:
+            pairs_table["err_R_e_arcsec_D1"].append(data_table[idx1]["err_R_e_arcsec"])
+            pairs_table["err_R_e_arcsec_D2"].append(data_table[idx2]["err_R_e_arcsec"])
 
         # calculate beta_E_DSPL
         _beta_E_DSPL_D1 = beta_double_source_plane(
