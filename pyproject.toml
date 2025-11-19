@@ -1,0 +1,6 @@
+[project]
+name = "pdspl-analysis"
+version = "0.0.1"
+
+[tool.setuptools]
+py-modules = ["pdspl_analysis_utils"]

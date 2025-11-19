@@ -1,0 +1,16 @@
+axes.linewidth: 2.0
+xtick.major.width: 1.5
+ytick.major.width: 1.5
+xtick.direction: in
+ytick.direction: in
+xtick.top: True
+ytick.right: True
+font.family: serif
+font.serif: Times New Roman, Computer Modern Roman
+axes.labelsize: 18
+axes.titlesize: 18
+xtick.labelsize: 14
+ytick.labelsize: 14
+figure.dpi: 150
+savefig.dpi: 300
+savefig.bbox: tight
