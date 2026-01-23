@@ -361,3 +361,68 @@ def get_pairs_table_PDSPL(data_table, pair_indices, cosmo, progress_bar=True):
 
     return pairs_table
 #############################################################################
+
+
+
+#############################################################################
+# PRIORS
+#############################################################################
+# class CustomPrior(object):
+#     def __init__(self, log_scatter=False, anisotropy='const'):
+#         """Customized prior distribution
+
+#         Args:
+#             log_scatter (bool, optional): _description_. Defaults to False.
+#             anisotropy (str, optional): _description_. Defaults to 'const'.
+#         """
+#         self._log_scatter = log_scatter
+#         # we use flat priors on constant anisotropy, and 1/a_ani prior for Osipkov-Merrit anisotropy
+#         if anisotropy == 'const': 
+#             self._ani_log = False
+#         else:
+#             self._ani_log = True
+
+
+#     def __call__(self, kwargs_cosmo, kwargs_lens, kwargs_kin, kwargs_source, kwargs_los):
+#         return self.log_likelihood(kwargs_cosmo, kwargs_lens, kwargs_kin, kwargs_source, kwargs_los)
+
+#     def log_likelihood(self, kwargs_cosmo, kwargs_lens, kwargs_kin, kwargs_source, kwargs_los):
+
+#         logL = 0
+
+#         if self._log_scatter is True:
+#             lambda_mst_sigma = kwargs_lens.get('lambda_mst_sigma', 1)
+#             logL += np.log(1/lambda_mst_sigma)
+#             a_ani_sigma = kwargs_kin.get('a_ani_sigma', 1)
+#             logL += np.log(1/a_ani_sigma)
+#             sigma_v_sys_error = kwargs_kin.get('sigma_v_sys_error', 1)
+#             logL += np.log(1/sigma_v_sys_error)
+#         if self._ani_log is True:
+#             a_ani = kwargs_kin.get('a_ani', 1)
+#             logL += np.log(1/a_ani)
+#         return logL
+
+class OmegaMPrior(object):
+    def __init__(self, mean, sigma):
+        """
+        Gaussian prior on Omega_m.
+        
+        Args:
+            mean (float): Target mean for Omega_m (e.g., 0.3)
+            sigma (float): Gaussian width (e.g., 0.05)
+        """
+        self._mean = mean
+        self._sigma = sigma
+
+    def __call__(self, kwargs_cosmo, kwargs_lens, kwargs_kin, kwargs_source, kwargs_los):
+        """
+        This method is called by CosmoLikelihood inside the MCMC loop.
+        """
+        # Extract the current value of Omega_m being sampled
+        om = kwargs_cosmo['om']
+        
+        # Calculate the Gaussian Log-Likelihood
+        # We ignore the normalization constant as it doesn't affect the MCMC sampler
+        logL = -0.5 * ((om - self._mean) / self._sigma)**2
+        
+        return logL
