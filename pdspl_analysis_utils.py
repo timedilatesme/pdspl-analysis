@@ -5,6 +5,14 @@ from itertools import combinations
 # from hierarc.Likelihood.LensLikelihood.double_source_plane import beta2theta_e_ratio, beta_double_source_plane
 # from lenstronomy.LensModel.lens_model import LensModel
 from scipy import spatial
+from astropy.cosmology import FlatLambdaCDM
+
+#############################################################################
+# Default Parameters
+#############################################################################
+DEFAULT_COSMOLOGY = FlatLambdaCDM(H0=70, Om0=0.3)
+##############################################################################
+
 
 #############################################################################
 # PDSPL UTILITIES
