@@ -1,0 +1,248 @@
+"""
+dspl_inference.py
+A complete toolkit for Double Source Plane Lens (DSPL) cosmology.
+Updated to support fixed parameters, H0, unbiased mock data generation, 
+and correct down-sampling (Asimov & Noisy).
+"""
+
+import numpy as np
+import emcee
+from astropy.cosmology import Flatw0waCDM
+from multiprocessing import Pool
+
+# --- 1. PHYSICS & SIMULATION FUNCTIONS ---
+
+def beta_double_source_plane(z_lens, z_source_1, z_source_2, cosmo):
+    """
+    Model prediction of ratio of scaled deflection angles.
+    """
+    z_lens = np.atleast_1d(z_lens)
+    z_source_1 = np.atleast_1d(z_source_1)
+    z_source_2 = np.atleast_1d(z_source_2)
+
+    ds1 = cosmo.angular_diameter_distance(z_source_1).value
+    ds2 = cosmo.angular_diameter_distance(z_source_2).value
+    dds1 = cosmo.angular_diameter_distance_z1z2(z_lens, z_source_1).value
+    dds2 = cosmo.angular_diameter_distance_z1z2(z_lens, z_source_2).value
+    
+    beta = (dds1 / ds1) * (ds2 / dds2)
+    return beta
+
+def beta2theta_e_ratio(beta_dsp, gamma_pl=2.0, lambda_mst=1.0):
+    """
+    Calculates Einstein radii ratio for a power-law + MST profile.
+    """
+    base_term = beta_dsp - (1 - lambda_mst) * (1 - beta_dsp)
+    
+    if np.isscalar(base_term):
+        if base_term <= 0: return np.nan
+    else:
+        base_term[base_term <= 0] = np.nan
+
+    return base_term ** (1.0 / (gamma_pl - 1.0))
+
+def draw_lens_from_given_zs(z_lens, z1, z2, 
+                            lambda_mst_mean, lambda_mst_sigma, 
+                            gamma_pl_mean, gamma_pl_sigma, 
+                            sigma_beta_rel, cosmo,
+                            down_sampling=1, with_noise=True,):
+    """
+    Generate a single DSPL system dictionary (Mock Data).
+    Safely handles down_sampling for both noisy and Asimov (noiseless) forecasts.
+    """
+    # 1. Base geometric beta
+    beta_geo = beta_double_source_plane(z_lens, z1, z2, cosmo=cosmo)
+    
+    # 2. Model prediction AT THE MEAN
+    mu_model = beta2theta_e_ratio(beta_dsp=beta_geo, gamma_pl=gamma_pl_mean, lambda_mst=lambda_mst_mean)
+    
+    # 3. Calculate derivatives 
+    U = beta_geo - (1 - lambda_mst_mean) * (1 - beta_geo)
+    dy_dlambda = mu_model * (1 - beta_geo) / ((gamma_pl_mean - 1) * U)
+    dy_dgamma = - mu_model * np.log(U) / ((gamma_pl_mean - 1)**2)
+    
+    # 4. Calculate absolute variances
+    sigma_pop_sq = (dy_dlambda * lambda_mst_sigma)**2 + (dy_dgamma * gamma_pl_sigma)**2
+    sigma_meas_sq = (sigma_beta_rel * mu_model)**2 
+    
+    if with_noise:
+        # If noisy, we simulate a "binned" data point. The variance drops by the down_sampling factor.
+        sigma_tot_binned = np.sqrt((sigma_meas_sq + sigma_pop_sq) / down_sampling)
+        beta_measured = np.random.normal(loc=mu_model, scale=sigma_tot_binned)
+    else:
+        # Asimov dataset: observed data rests exactly on the truth.
+        beta_measured = mu_model
+
+    return {
+        "z_lens": z_lens, "z_source": z1, "z_source2": z2,
+        "beta_dspl": beta_measured,
+        "sigma_beta_dspl": sigma_beta_rel * mu_model, # Pass baseline measurement error
+        "sigma_pop_true_sq": sigma_pop_sq,            # Needed for accurate Asimov scaling
+        "with_noise": with_noise                      # Tell the likelihood how to evaluate
+    }
+
+
+# --- 2. INFERENCE FRAMEWORK ---
+
+ALL_PARAM_NAMES = [
+    'h0', 'om', 'w0', 'wa', 
+    'lambda_int', 'lambda_sigma', 
+    'gamma_pl', 'gamma_sigma'
+]
+
+class DSPLLikelihood:
+    def __init__(self, kwargs_likelihood_list, sampled_params, fixed_params, down_sampling=1, priors=None):
+        self.sampled_params = sampled_params
+        self.fixed_params = fixed_params
+        self.down_sampling = down_sampling
+        
+        # Unpack Data
+        self.z_l = np.array([d['z_lens'] for d in kwargs_likelihood_list]).flatten()
+        self.z_s1 = np.array([d['z_source'] for d in kwargs_likelihood_list]).flatten()
+        self.z_s2 = np.array([d['z_source2'] for d in kwargs_likelihood_list]).flatten()
+        self.beta_obs = np.array([d['beta_dspl'] for d in kwargs_likelihood_list]).flatten()
+        
+        self.sigma_meas = np.array([d['sigma_beta_dspl'] for d in kwargs_likelihood_list]).flatten()
+        self.sigma_pop_true_sq = np.array([d.get('sigma_pop_true_sq', 0.0) for d in kwargs_likelihood_list]).flatten()
+        
+        # Determine if we are running an Asimov (noiseless) forecast
+        with_noise_flags = [d.get('with_noise', True) for d in kwargs_likelihood_list]
+        self.is_asimov = not any(with_noise_flags)
+        
+        # Default Priors
+        self.priors = {
+            'h0': ('uniform', 50.0, 90.0),
+            'om': ('uniform', 0.0, 1.0),
+            'w0': ('uniform', -3.0, 0.0),
+            'wa': ('uniform', -5.0, 5.0),
+            'lambda_int': ('uniform', 0.8, 1.2),
+            'lambda_sigma': ('uniform', 0.0, 0.2),
+            'gamma_pl': ('uniform', 1.0, 3.0),
+            'gamma_sigma': ('uniform', 0.0, 0.5)
+        }
+        if priors is not None:
+            self.priors.update(priors)
+
+    def _get_full_params(self, theta):
+        params = self.fixed_params.copy()
+        for name, val in zip(self.sampled_params, theta):
+            params[name] = val
+        return params
+
+    def get_derivatives(self, beta_geo, lambda_int, gamma_pl, model_val):
+        with np.errstate(invalid='ignore', divide='ignore'):
+            U = beta_geo - (1 - lambda_int) * (1 - beta_geo)
+            if np.any(U <= 0): return np.nan, np.nan
+            dy_dlambda = model_val * (1 - beta_geo) / ((gamma_pl - 1) * U)
+            dy_dgamma = - model_val * np.log(U) / ((gamma_pl - 1)**2)
+        return dy_dlambda, dy_dgamma
+
+    def log_prior(self, theta):
+        lp = 0.0
+        for i, name in enumerate(self.sampled_params):
+            val = theta[i]
+            prior_type, p1, p2 = self.priors[name]
+            if prior_type == 'uniform':
+                if not (p1 < val < p2): return -np.inf
+            elif prior_type == 'gaussian':
+                lp += -0.5 * ((val - p1)**2 / p2**2) - np.log(p2)
+        return lp
+
+    def log_likelihood(self, theta):
+        p = self._get_full_params(theta)
+        
+        try:
+            cosmo_step = Flatw0waCDM(H0=p['h0'], Om0=p['om'], w0=p['w0'], wa=p['wa'])
+            beta_geo = beta_double_source_plane(self.z_l, self.z_s1, self.z_s2, cosmo_step)
+        except Exception:
+            return -np.inf 
+
+        model_mu = beta2theta_e_ratio(beta_geo, gamma_pl=p['gamma_pl'], lambda_mst=p['lambda_int'])
+        if np.any(np.isnan(model_mu)): return -np.inf
+
+        # Variance Propagation
+        dy_dlam, dy_dgam = self.get_derivatives(beta_geo, p['lambda_int'], p['gamma_pl'], model_mu)
+        sigma_pop_sq = 0
+        if 'lambda_sigma' in self.sampled_params:
+            sigma_pop_sq += (dy_dlam * p['lambda_sigma'])**2
+        if 'gamma_sigma' in self.sampled_params:
+            sigma_pop_sq += (dy_dgam * p['gamma_sigma'])**2
+            
+        sigma_tot_model_sq = self.sigma_meas**2 + sigma_pop_sq
+
+        # Evaluate Probability (Dual-Track Logic)
+        if self.is_asimov:
+            # 1. Asimov Expected Log-Likelihood (Noiseless scaling)
+            sigma_tot_true_sq = self.sigma_meas**2 + self.sigma_pop_true_sq
+            expected_residuals_sq = sigma_tot_true_sq + (self.beta_obs - model_mu)**2
+            
+            log_prob = -0.5 * self.down_sampling * np.sum( (expected_residuals_sq / sigma_tot_model_sq) + np.log(sigma_tot_model_sq) )
+        else:
+            # 2. Standard Log-Likelihood (Noisy binned data)
+            sigma_tot_binned_sq = sigma_tot_model_sq / self.down_sampling
+            residuals_sq = (self.beta_obs - model_mu)**2
+            
+            log_prob = -0.5 * np.sum( (residuals_sq / sigma_tot_binned_sq) + np.log(sigma_tot_binned_sq) )
+        
+        if np.isnan(log_prob): return -np.inf
+        return log_prob
+
+    def log_probability(self, theta):
+        lp = self.log_prior(theta)
+        if not np.isfinite(lp): return -np.inf
+        ll = self.log_likelihood(theta)
+        return lp + ll
+
+def run_dspl_inference(kwargs_dspl_list, down_sampling=1, n_walkers=32, n_steps=1000, n_burn=200, 
+                       initial_guess=None, initial_scatter=None, priors=None, 
+                       fixed_params=None):
+    if fixed_params is None: fixed_params = {}
+    sampled_params = [p for p in ALL_PARAM_NAMES if p not in fixed_params]
+    
+    print(f"--- Starting DSPL Inference ---")
+    print(f"Fixed Params  : {list(fixed_params.keys())}")
+    print(f"Sampled Params: {sampled_params}")
+    print(f"Down Sampling : {down_sampling}")
+
+    default_start = {
+        'h0': 70.0, 'om': 0.3, 'w0': -1.0, 'wa': 0.0,
+        'lambda_int': 1.0, 'lambda_sigma': 0.05,
+        'gamma_pl': 2.0, 'gamma_sigma': 0.1
+    }
+    default_scatter = {k: 1e-3 for k in ALL_PARAM_NAMES}
+
+    if initial_guess: default_start.update(initial_guess)
+    if initial_scatter: default_scatter.update(initial_scatter)
+
+    like = DSPLLikelihood(kwargs_dspl_list, sampled_params, fixed_params, down_sampling=down_sampling, priors=priors)
+
+    # Safely initialize walkers to prevent math domain errors (-inf)
+    ndim = len(sampled_params)
+    p0 = np.zeros((n_walkers, ndim))
+    for w in range(n_walkers):
+        valid = False
+        while not valid:
+            pos = np.zeros(ndim)
+            for i, name in enumerate(sampled_params):
+                mu = default_start[name]
+                sig = default_scatter[name]
+                pos[i] = mu + sig * np.random.randn()
+                if 'sigma' in name: pos[i] = np.abs(pos[i])
+            if np.isfinite(like.log_probability(pos)):
+                p0[w] = pos
+                valid = True
+
+    with Pool() as pool:
+        sampler = emcee.EnsembleSampler(n_walkers, ndim, like.log_probability, pool=pool)
+        sampler.run_mcmc(p0, n_steps, progress=True)
+
+    flat_samples = sampler.get_chain(discard=n_burn, thin=1, flat=True)
+    
+    latex_labels = {
+        'h0': r"$H_0$", 'om': r"$\Omega_m$", 'w0': r"$w_0$", 'wa': r"$w_a$",
+        'lambda_int': r"$\bar{\lambda}_{int}$", 'lambda_sigma': r"$\sigma_{\lambda}$",
+        'gamma_pl': r"$\bar{\gamma}_{pl}$", 'gamma_sigma': r"$\sigma_{\gamma}$"
+    }
+    labels = [latex_labels[n] for n in sampled_params]
+    
+    return flat_samples, labels
