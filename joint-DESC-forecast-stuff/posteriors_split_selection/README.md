@@ -2,7 +2,7 @@
 
 ## Plot of scatter in beta_E vs dissimilarity with different cuts
 
-![scatter_in_beta_E_vs_dissimilarity.png](../figures/scatter_in_beta_E_vs_dissimilarity.png)
+![scatter_in_beta_E_vs_dissimilarity.png](./figures/scatter_in_beta_E_vs_dissimilarity.png)
 
 ## Plot of PDSPL Posteriors at different dissimilarity cuts
 
