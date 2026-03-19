@@ -184,7 +184,8 @@ def draw_lens_from_given_zs(z_lens, z1, z2,
         "with_noise": with_noise,
         "dissimilarity": dissimilarity,               
         "err_zl": err_zl, "err_zs1": err_zs1, "err_zs2": err_zs2,
-        "dbeta_dzl": dbeta_dzl, "dbeta_dzs1": dbeta_dzs1, "dbeta_dzs2": dbeta_dzs2
+        "dbeta_dzl": dbeta_dzl, "dbeta_dzs1": dbeta_dzs1, "dbeta_dzs2": dbeta_dzs2,
+        "down_sampling": down_sampling
     }
 
 # --- 2. INFERENCE FRAMEWORK ---
@@ -200,13 +201,13 @@ class DSPLLikelihood:
     """
     A class containing the log-likelihood evaluation logic for MCMC sampling.
     """
-    def __init__(self, kwargs_likelihood_list, sampled_params, fixed_params, down_sampling=1, priors=None):
+    def __init__(self, kwargs_likelihood_list, sampled_params, fixed_params, priors=None):
         """
         Initializes the likelihood object by unpacking the list of mock dictionaries into numpy arrays.
         """
         self.sampled_params = sampled_params
         self.fixed_params = fixed_params
-        self.down_sampling = down_sampling
+        self.down_sampling = np.array([d.get('down_sampling', 1.0) for d in kwargs_likelihood_list]).flatten()
         
         self.z_l = np.array([d['z_lens'] for d in kwargs_likelihood_list]).flatten()
         self.z_s1 = np.array([d['z_source'] for d in kwargs_likelihood_list]).flatten()
@@ -311,7 +312,7 @@ class DSPLLikelihood:
         if self.is_asimov:
             sigma_tot_true_sq = self.sigma_meas**2 + self.sigma_pop_true_sq
             expected_residuals_sq = sigma_tot_true_sq + (self.beta_obs - model_mu)**2
-            log_prob = -0.5 * self.down_sampling * np.sum( (expected_residuals_sq / sigma_tot_model_sq) + np.log(sigma_tot_model_sq) )
+            log_prob = -0.5 * np.sum( self.down_sampling * ((expected_residuals_sq / sigma_tot_model_sq) + np.log(sigma_tot_model_sq)) )
         else:
             sigma_tot_binned_sq = sigma_tot_model_sq / self.down_sampling
             residuals_sq = (self.beta_obs - model_mu)**2
@@ -328,7 +329,7 @@ class DSPLLikelihood:
         return lp + ll
 
 
-def run_dspl_inference(kwargs_dspl_list, down_sampling=1, n_walkers=32, n_steps=1000, n_burn=200, 
+def run_dspl_inference(kwargs_dspl_list, n_walkers=32, n_steps=1000, n_burn=200, 
                        initial_guess=None, initial_scatter=None, priors=None, 
                        fixed_params=None, backend_path=None):
     """
@@ -372,7 +373,7 @@ def run_dspl_inference(kwargs_dspl_list, down_sampling=1, n_walkers=32, n_steps=
     if initial_guess: default_start.update(initial_guess)
     if initial_scatter: default_scatter.update(initial_scatter)
 
-    like = DSPLLikelihood(kwargs_dspl_list, sampled_params, fixed_params, down_sampling=down_sampling, priors=priors)
+    like = DSPLLikelihood(kwargs_dspl_list, sampled_params, fixed_params, priors=priors)
 
     ndim = len(sampled_params)
     p0 = np.zeros((n_walkers, ndim))

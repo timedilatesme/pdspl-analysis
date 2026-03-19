@@ -1,152 +1,22 @@
 from astropy.table import Table
 import numpy as np
 from tqdm import tqdm
-from itertools import combinations
-# from hierarc.Likelihood.LensLikelihood.double_source_plane import beta2theta_e_ratio, beta_double_source_plane
-# from lenstronomy.LensModel.lens_model import LensModel
+import corner
 from scipy import spatial
-from astropy.cosmology import FlatLambdaCDM
+import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
+from scipy.stats import gaussian_kde
+import matplotlib.patches as mpatches
+import matplotlib.lines as mlines
 
-#############################################################################
-# Default Parameters
-#############################################################################
-DEFAULT_COSMOLOGY = FlatLambdaCDM(H0=70, Om0=0.3)
-##############################################################################
-
-
-#############################################################################
-# PDSPL UTILITIES
-#############################################################################
-def beta_double_source_plane(z_lens, z_source_1, z_source_2, cosmo):
-    """Model prediction of ratio of scaled deflection angles.
-
-    :param z_lens: lens redshift
-    :param z_source_1: source_1 redshift
-    :param z_source_2: source_2 redshift
-    :param cosmo: ~astropy.cosmology instance
-    :return: beta
-    """
-    ds1 = cosmo.angular_diameter_distance(z_source_1).value
-    dds1 = cosmo.angular_diameter_distance_z1z2(z_lens, z_source_1).value
-    ds2 = cosmo.angular_diameter_distance(z_source_2).value
-    dds2 = cosmo.angular_diameter_distance_z1z2(z_lens, z_source_2).value
-    beta = dds1 / ds1 * ds2 / dds2
-    return beta
-
-
-def beta2theta_e_ratio(beta_dsp, gamma_pl=2, lambda_mst=1):
-    """Calculates Einstein radii ratio for a power-law + MST profile with given
-    parameters.
-
-    :param beta_dsp: scaled deflection angles alpha_1 / alpha_2 as ratio between
-        z_source and z_source2 source planes
-    :param gamma_pl: power-law density slope of main deflector (=2 being isothermal)
-    :param lambda_mst: mass-sheet transform at the main deflector
-    :return: theta_E1 / theta_E2
-    """
-    return (beta_dsp - (1 - lambda_mst) * (1 - beta_dsp)) ** (1 / (gamma_pl - 1))
-
-def draw_lens_from_given_zs(z_lens, z1, z2, 
-                            lambda_mst_mean, lambda_mst_sigma, gamma_pl_mean, gamma_pl_sigma, 
-                            sigma_beta, cosmo,
-                            down_sampling=1, with_noise=False, fixed_scatter_forecast=True,):
-    """
-    draw the likelihood object of a double source plane lens
-
-    :param z_lens: redshift of the lens
-    :param z1: redshift of the first source plane
-    :param z2: redshift of the second source plane
-    :param lambda_mst_mean: mean value of the mass-sheet transformation parameter
-    :param lambda_mst_sigma: standard deviation of the mass-sheet transformation parameter
-    :param gamma_pl_mean: mean value of the power-law slope of the lensing potential
-    :param gamma_pl_sigma: standard deviation of the power-law slope of the lensing potential
-    :param sigma_beta: relative precision on Einstein radius, used to compute the noise on the measured beta
-    :param down_sampling: downsampling factor, noise will be reduced by sqrt(down_sampling)
-    :param with_noise: if True, add noise to the measured beta 
-    """
-    beta = beta_double_source_plane(z_lens, z1, z2, cosmo=cosmo)
-    
-    if fixed_scatter_forecast:
-        beta_e_list = []
-        beta_e_mean = beta2theta_e_ratio(beta_dsp=beta, gamma_pl=gamma_pl_mean, lambda_mst=lambda_mst_mean)
-        for i in range(100):
-            lambda_mst = np.random.normal(lambda_mst_mean, lambda_mst_sigma)
-            gamma_pl = np.random.normal(gamma_pl_mean, gamma_pl_sigma)
-            beta_e_ = beta2theta_e_ratio(beta_dsp=beta, gamma_pl=gamma_pl, lambda_mst=lambda_mst)
-            beta_e_list.append(beta_e_)
-        beta_e_list = np.array(beta_e_list)
-        beta_e_mean_ = np.mean(beta_e_list)
-        beta_e_sigma = np.sqrt(np.std(beta_e_list)**2 + (sigma_beta * beta_e_mean)**2) / np.sqrt(down_sampling)
-    else:
-        # draw lambda_mst and gamma_pl from their distributions
-        lambda_mst = np.random.normal(lambda_mst_mean, lambda_mst_sigma)
-        gamma_pl = np.random.normal(gamma_pl_mean, gamma_pl_sigma)
-        # calculate the corresponding beta_E
-        beta_e_mean = beta2theta_e_ratio(beta_dsp=beta, gamma_pl=gamma_pl, lambda_mst=lambda_mst)
-        beta_e_sigma = sigma_beta * beta_e_mean / np.sqrt(down_sampling)
-
-    if with_noise:
-        beta_measured = beta_e_mean + np.random.normal(loc=0, scale=beta_e_sigma)
-    else:
-        beta_measured = beta_e_mean
-
-    kwargs_likelihood = {
-        "z_lens": z_lens,
-        "z_source": z1,
-        "z_source2": z2,
-        "beta_dspl": beta_measured,
-        "sigma_beta_dspl": beta_e_sigma,
-        "likelihood_type": "DSPL",
-    }
-    return kwargs_likelihood
-#############################################################################
-
-#############################################################################
-# PLANE FITTING AND SCATTER
-#############################################################################
-# Fit plane to the data
-def fit_plane(x, y, z):
-    """Fit a plane to the data points (x, y, z). The plane is z = ax + by + c."""
-
-    # don't use nans or infs
-    x = np.array(x)
-    y = np.array(y)
-    z = np.array(z)
-    mask = np.isfinite(x) & np.isfinite(y) & np.isfinite(z)
-    x = x[mask]
-    y = y[mask]
-    z = z[mask]
-
-    A = np.c_[x, y, np.ones_like(x)]
-    coeffs, _, _, _ = np.linalg.lstsq(A, z, rcond=None)
-    return coeffs
-
-# Find the scatter of the data points from the fitted plane
-def find_scatter(x, y, z, coeffs, return_fit=False):
-    """Find the scatter of the data points from the fitted plane. Return ``z - z_fit``."""
-
-    # don't use nans or infs
-    x = np.array(x)
-    y = np.array(y)
-    z = np.array(z)
-    mask = np.isfinite(x) & np.isfinite(y) & np.isfinite(z)
-    x = x[mask]
-    y = y[mask]
-    z = z[mask]
-
-    z_fit = coeffs[0] * x + coeffs[1] * y + coeffs[2]
-    scatter = z - z_fit
-    if return_fit:
-        return scatter, z_fit
-    else:
-        return scatter
-############################################################################
+from pdspl_utils.inference import beta_double_source_plane, beta2theta_e_ratio
 
 ############################################################################
 # PAIRING SIMULATION
 ############################################################################
+
 def normalize_data(data, type='minmax', data_min=None, data_max=None):
-    """Normalize the data to the range [0, 1].
+    """Normalize the data to the range [0, 1] or by Z-score.
     Parameters
     ----------
     data : array-like
@@ -167,322 +37,611 @@ def normalize_data(data, type='minmax', data_min=None, data_max=None):
     normalized_data : array-like
         The normalized data.
     """
-    data = np.array(data)
+    data = np.array(data, dtype=float)
     if type == 'minmax':
-        if data_min is None:
-            data_min = np.nanmin(data)
-        if data_max is None:
-            data_max = np.nanmax(data)
-        normalized_data = (data - data_min) / (data_max - data_min)
+        data_min = np.nanmin(data) if data_min is None else data_min
+        data_max = np.nanmax(data) if data_max is None else data_max
+        if data_max == data_min: return np.zeros_like(data)
+        return (data - data_min) / (data_max - data_min)
     elif type == 'zscore':
-        mean = np.nanmean(data)
         std = np.nanstd(data)
-        normalized_data = (data - mean) / std
+        if std == 0: return np.zeros_like(data)
+        return (data - np.nanmean(data)) / std
     else:
         raise ValueError("Unsupported normalization type. Use 'minmax' or 'zscore'.")
-    return normalized_data
 
+# def get_kdtree_pairs(table, pairing_keys, norm_type='zscore', n_neighbors=2, unique_pairs=True):
+#     """
+#     General function to find near-identical pairs in ANY table based on specified keys.
 
-def kdtree_matching_n_dim(points, n_neighbors=2, unique_pairs=True):
-    """Find the nearest neighbors in n-dimensional space using a KDTree.
+#         :param table: Astropy Table containing the data.
+#         :param pairing_keys: List of column names to use for pairing.
+#         :param norm_type: Type of normalization ('minmax' or 'zscore').
+#         :param n_neighbors: Number of nearest neighbors to find (including self). Set to 2 for just the closest pair.
+#         :param unique_pairs: If True, ensures that pairs are unique (i.e., (i, j) is the same as (j, i) and only one is kept).
+#     """
+#     # 1. Normalize and stack the features into a multi-dimensional space
+#     points = np.stack([normalize_data(table[pk], type=norm_type) for pk in pairing_keys], axis=1)
+    
+#     # 2. Build and query KDTree
+#     tree = spatial.KDTree(points)
+#     distances, indices = tree.query(points, k=n_neighbors)
+#     distances = distances[:, 1] # exclude self-distance
+    
+#     # 3. Filter unique pairs
+#     if unique_pairs:
+#         indices = np.sort(indices, axis=1) # Ensure (i, j) is same as (j, i)
+#         indices, unique_pairs_idxs = np.unique(indices, axis=0, return_index=True)
+#         distances = distances[unique_pairs_idxs]
 
-    Parameters
-    ----------
-    points : array-like, shape (n_samples, n_features)
-        The input points to build the KDTree.
-    n_neighbors : int, optional
-        The number of nearest neighbors to find. Default is 2. Note that if it is set to 1, the self-match will be returned.
-    unique_pairs : bool, optional
-        If True, only unique pairs are returned. Default is True.
+#     return indices, distances
 
-    Returns
-    -------
-    indices : array, shape (n_samples, n_neighbors)
-        Indices of the nearest neighbors for each point.
-    distances : array, shape (n_samples, n_neighbors)
-        Distances to the nearest neighbors for each point.
+def get_kdtree_pairs(table, pairing_keys, norm_type='zscore', n_neighbors=2, unique_pairs=True):
     """
+    Finds near-identical pairs in ANY table based on specified keys, up to the k-th nearest neighbor.
+
+    :param table: Astropy Table containing the data.
+    :param pairing_keys: List of column names to use for pairing.
+    :param norm_type: Type of normalization ('minmax' or 'zscore').
+    :param n_neighbors: Number of nearest neighbors to find (including self). 
+                        e.g., n_neighbors=2 returns 1 pair per lens (the closest).
+                              n_neighbors=3 returns 2 pairs per lens (1st and 2nd closest).
+    :param unique_pairs: If True, ensures that pairs are unique (i.e., (i, j) is the same as (j, i)).
+    """
+    # 1. Normalize and stack the features
+    points = np.stack([normalize_data(table[pk], type=norm_type) for pk in pairing_keys], axis=1)
+    
+    # 2. Build and query KDTree
     tree = spatial.KDTree(points)
     distances, indices = tree.query(points, k=n_neighbors)
+    
+    # Handle edge case where n_neighbors is just 1 (only finds itself)
+    if n_neighbors < 2:
+        return np.empty((0, 2), dtype=int), np.empty(0)
 
-    distances = distances[:,1] # exclude self-distance (0th column)
-
+    # 3. Flatten the arrays to create actual pair combinations
+    n_points = len(points)
+    
+    # Repeat the base indices for however many neighbors we are extracting
+    base_indices = np.repeat(np.arange(n_points), n_neighbors - 1)
+    
+    # Flatten the neighbor indices and distances (skipping column 0, which is self-distance)
+    neighbor_indices = indices[:, 1:].flatten()
+    flat_distances = distances[:, 1:].flatten()
+    
+    # Create the Nx2 array of pairs
+    pair_indices = np.column_stack((base_indices, neighbor_indices))
+    
+    # 4. Filter unique pairs
     if unique_pairs:
-        # Sort each pair to ensure (i, j) and (j, i) are treated the same
-        for i in range(indices.shape[0]):
-            if indices[i][0] > indices[i][1]:
-                indices[i] = indices[i][::-1] # reverse the order
+        # Sort each row so that (i, j) becomes (min(i,j), max(i,j))
+        pair_indices = np.sort(pair_indices, axis=1)
+        # Extract the unique rows
+        pair_indices, unique_pairs_idxs = np.unique(pair_indices, axis=0, return_index=True)
+        flat_distances = flat_distances[unique_pairs_idxs]
+
+    return pair_indices, flat_distances
+
+def build_generic_pairs_table(table, pair_indices, sort_by=None):
+    """
+    Takes an input table and pair indices, returning a new table where each row is a pair.
+    Every column 'X' in the original table becomes 'X_1' and 'X_2'.
+    
+    :param sort_by: Optional column name. If provided, ensures entity '1' has the lower value.
+    """
+    idx1 = pair_indices[:, 0].copy()
+    idx2 = pair_indices[:, 1].copy()
+
+    # Optional: Enforce ordering (e.g., ensuring z_S1 < z_S2)
+    if sort_by and sort_by in table.colnames:
+        swap_mask = table[idx1][sort_by] > table[idx2][sort_by]
+        idx1[swap_mask], idx2[swap_mask] = idx2[swap_mask], idx1[swap_mask]
+
+    pairs_dict = {"index_1": idx1, "index_2": idx2}
+    
+    for col in table.colnames:
+        pairs_dict[f"{col}_1"] = table[col][idx1]
+        pairs_dict[f"{col}_2"] = table[col][idx2]
         
-        # only return unique pairs
-        indices, unique_pairs_idxs = np.unique(indices, axis=0, return_index=True)
-        distances = distances[unique_pairs_idxs]
+    return Table(pairs_dict)
 
-    return indices, distances
+############################################################################
+# PDSPL EXTENSIONS
+############################################################################
 
-def get_pairs_table_PDSPL(data_table, pair_indices, cosmo, progress_bar=True):
-    """Get the pairs table for the PDSPL model.
+def calculate_rel_diff(val1, val2):
+    """Helper to calculate fractional difference."""
+    return 2 * (val2 - val1) / (val2 + val1)
+
+def get_pairs_table_PDSPL(data_table, pair_indices, cosmo):
+    """
+    Builds the PDSPL-specific table on top of the generic pairs table.
+    """
+    # 1. Build the generic table, enforcing z_S1 < z_S2
+    pt = build_generic_pairs_table(data_table, pair_indices, sort_by="z_S")
+    
+    # 2. Add convenient combined properties
+    pt["z_D"] = 0.5 * (pt["z_D_1"] + pt["z_D_2"])
+    
+    # Rename some columns back to your original naming convention if necessary
+    pt.rename_column('z_S_1', 'z_S1')
+    pt.rename_column('z_S_2', 'z_S2')
+    pt.rename_column('theta_E_1', 'theta_E1')
+    pt.rename_column('theta_E_2', 'theta_E2')
+    
+    # 3. Calculate DSPL beta properties
+    _beta_E_DSPL_D1 = beta_double_source_plane(pt["z_D_1"], pt["z_S1"], pt["z_S2"], cosmo)
+    _beta_E_DSPL_D2 = beta_double_source_plane(pt["z_D_2"], pt["z_S1"], pt["z_S2"], cosmo)
+    
+    beta_E_DSPL_D1 = beta2theta_e_ratio(_beta_E_DSPL_D1, gamma_pl=pt["gamma_pl_1"], lambda_mst=1)
+    beta_E_DSPL_D2 = beta2theta_e_ratio(_beta_E_DSPL_D2, gamma_pl=pt["gamma_pl_2"], lambda_mst=1)
+    
+    pt["beta_E_DSPL"] = 0.5 * (beta_E_DSPL_D1 + beta_E_DSPL_D2)
+    pt["beta_E_pseudo"] = pt["theta_E1"] / pt["theta_E2"]
+    
+    # 4. Add calculated relative differences
+    pt["rel_diff_beta_E"] = 1 - pt['beta_E_pseudo'] / pt['beta_E_DSPL']
+    
+    diff_keys = ['sigma_v_D', 'R_e_kpc', 'R_e_arcsec', 'Sigma_half_Msun/pc2', 
+                 'mag_D_i', 'z_D', 'gamma_pl', 'color_D_gr', 'color_D_ri']
+    
+    for key in diff_keys:
+        if f"{key}_1" in pt.colnames and f"{key}_2" in pt.colnames:
+            pt[f"rel_diff_{key}"] = calculate_rel_diff(pt[f"{key}_1"], pt[f"{key}_2"])
+            
+    return pt
+
+def inject_observational_errors(table, sample_key):
+    """Generates a new table with added Gaussian noise based on sample assumptions."""
+    noisy_table = table.copy()
+    
+    # z_D errors
+    if sample_key in ['lsst_y1', 'lsst_y10']:
+        err_z_D = 0.03 * (1 + table['z_D']) # Photo-z
+    elif sample_key in ['lsst_4most_spec-z', 'lsst_4most_spec-z_sigma_v']:
+        err_z_D = np.full(len(table), 1e-4) # Spec-z
+    else:
+        err_z_D = np.zeros(len(table))
+        
+    noisy_table['z_D'] += np.random.normal(0, err_z_D)
+    noisy_table['err_z_D'] = err_z_D
+
+    # sigma_v_D errors
+    err_sigma = np.full(len(table), 10.0)
+        
+    noisy_table['sigma_v_D'] += np.random.normal(0, err_sigma)
+    noisy_table['err_sigma_v_D'] = err_sigma
+
+    # R_e errors
+    err_R_e = 0.05 * table['R_e_arcsec']
+    noisy_table['R_e_arcsec'] += np.random.normal(0, err_R_e)
+    noisy_table['err_R_e_arcsec'] = err_R_e
+
+    # Magnitude errors
+    err_mag = 1e-3 # millimag precision
+    noisy_table['mag_D_i'] += np.random.normal(0, err_mag)
+    noisy_table['err_mag_D_i'] = err_mag
+    
+    return noisy_table
+
+def compute_dissimilarity(pairs_table, dissimilarity_keys, method='rms'):
+    """
+    Computes the dissimilarity metric between paired lenses.
 
     Parameters
     ----------
-    data_table : astropy.table.Table
-        The input data table containing the lens and source properties.
-    pair_indices : array, shape (n_pairs, 2)
-        Indices of the paired lenses.
-    cosmo : astropy.cosmology.Cosmology
-        The cosmology to use for lens distance calculations.
+    pairs_table : astropy.table.Table
+        The table containing the paired lenses and their properties.
+    dissimilarity_keys : list of str
+        The keys (e.g., 'rel_diff_z_D') used to calculate the metric.
+    method : str
+        'rms'  -> Root-Mean-Square of relative fractional differences.
+        'chi2' -> Error-Weighted distance (Mahalanobis/Chi-Square approach).
     """
-    pairs_table = {
-        "index_1": [],
-        "index_2": [],
-        "z_D1": [],
-        "z_D2": [],
-        "z_D": [],
-        "z_S1": [],
-        "z_S2": [],
-        "theta_E1": [],
-        "theta_E2": [],
-        "beta_E_DSPL": [],
-        "beta_E_pseudo": [],
-        "sigma_v_D1": [],
-        "sigma_v_D2": [],
-        "R_e_kpc_D1": [],
-        "R_e_kpc_D2": [],
-        "R_e_arcsec_D1": [],
-        "R_e_arcsec_D2": [],
-        "Sigma_half_Msun/pc2_D1": [],
-        "Sigma_half_Msun/pc2_D2": [],
-        "gamma_pl_1": [],
-        "gamma_pl_2": [],
-        "color_D_gr_1": [],
-        "color_D_gr_2": [],
-        "color_D_ri_1": [],
-        "color_D_ri_2": [],
-        "mag_D_i_1": [],
-        "mag_D_i_2": [],
+    if method == 'rms':
+        diffs = np.array([pairs_table[k] for k in dissimilarity_keys])
+        return np.sqrt(np.mean(diffs**2, axis=0))
+
+    elif method == 'chi2':
+        chi2_terms = []
+        for key in dissimilarity_keys:
+            # Extract the base physical parameter (e.g., 'z_D' from 'rel_diff_z_D')
+            base_feature = key.replace('rel_diff_', '')
+            
+            err_col1 = f"err_{base_feature}_1"
+            err_col2 = f"err_{base_feature}_2"
+            
+            # Use explicit observational errors if they exist in the mock table
+            if err_col1 in pairs_table.colnames and err_col2 in pairs_table.colnames:
+                val1 = pairs_table[f"{base_feature}_1"]
+                val2 = pairs_table[f"{base_feature}_2"]
+                
+                variance = pairs_table[err_col1]**2 + pairs_table[err_col2]**2
+                # Prevent division by zero if error is exactly 0
+                variance = np.where(variance == 0, 1e-12, variance)
+                
+                term = ((val1 - val2)**2) / variance
+            else:
+                # Fallback: Treat the relative difference against an assumed 10% error.
+                # This ensures features without explicit err_ columns (like colors) 
+                # don't get mathematically ignored compared to the chi2 terms.
+                assumed_fractional_error = 0.10 
+                term = (pairs_table[key] / assumed_fractional_error)**2
+                
+            chi2_terms.append(term)
+            
+        return np.sqrt(np.mean(chi2_terms, axis=0))
+
+    else:
+        raise ValueError(f"Unknown method '{method}'. Use 'rms' or 'chi2'.")
+
+def plot_beta_E_vs_D_MC(pdspl_samples, mc_results, fit_type='linear', save_path=None, show_fit_eqn_label=True):
+    """
+    Plots the scatter of beta_E vs Dissimilarity along with marginal distributions 
+    and MC realization statistics.
+    
+    :param fit_type: 'linear' or 'power_law'
+    """
+    alpha_vals = {
+        "lsst_y10": 0.007, "lsst_y1": 0.01, 
+        "lsst_4most_spec-z": 0.03, "lsst_4most_spec-z_sigma_v": 0.04
+    }
+    markers = {
+        "lsst_y10": "o", "lsst_y1": "s", 
+        "lsst_4most_spec-z": "s", "lsst_4most_spec-z_sigma_v": "D"
     }
 
-    if "err_z_D" in data_table.colnames:
-        pairs_table["err_z_D1"] = []
-        pairs_table["err_z_D2"] = []
-    if "err_sigma_v_D" in data_table.colnames:
-        pairs_table["err_sigma_v_D1"] = []
-        pairs_table["err_sigma_v_D2"] = []
-    if "err_R_e_arcsec" in data_table.colnames:
-        pairs_table["err_R_e_arcsec_D1"] = []
-        pairs_table["err_R_e_arcsec_D2"] = []
+    fig = plt.figure(figsize=(13, 6))
+    gs = GridSpec(4, 9, figure=fig, wspace=-0.02, hspace=-0.02)
 
-    if progress_bar:
-        iterator = tqdm(enumerate(pair_indices), total=len(pair_indices), desc="Processing pairs")
+    ax_scatter = fig.add_subplot(gs[1:, 0:3])
+    ax_histx   = fig.add_subplot(gs[0, 0:3], sharex=ax_scatter)
+    ax_histy   = fig.add_subplot(gs[1:, 3], sharey=ax_scatter)
+    ax_fit     = fig.add_subplot(gs[1:, 5:9])
+
+    # -------------------------------------------------------
+    # Thicken Axis Frames and Ticks
+    # -------------------------------------------------------
+    frame_width = 2.0
+    for ax in [ax_scatter, ax_fit]:
+        for spine in ax.spines.values():
+            spine.set_linewidth(frame_width)
+        # Match tick mark thickness to the frame
+        ax.tick_params(axis='both', which='major', width=frame_width, length=6)
+        ax.tick_params(axis='both', which='minor', width=frame_width, length=4)
+
+    for sample_key, s in pdspl_samples.items():
+        if "pairs_analysis" not in s:
+            continue
+            
+        color = s.get('color', 'black')
+        marker = markers.get(sample_key, 'o')
+        alpha = alpha_vals.get(sample_key, 0.01)
+
+        # -------------------------------------------------------
+        # LEFT PANEL: Single Realization Scatter & Distributions
+        # -------------------------------------------------------
+        tbl_err = s["pairs_analysis"]["pairs_table_with_errors"]
+        tbl = s["pairs_analysis"]["pairs_table"]
+
+        dissim = tbl_err['dissimilarity']
+        delta_beta_E = 1 - tbl['beta_E_pseudo'] / tbl['beta_E_DSPL']
+
+        # Apply mask
+        mask = (dissim < 0.1) & np.isfinite(delta_beta_E)
+        dissim_clean = dissim[mask]
+        delta_beta_clean = delta_beta_E[mask]
+
+        # 1. Scatter Plot
+        ax_scatter.scatter(dissim_clean, delta_beta_clean, color=color, alpha=alpha, s=10)
+
+        # 2. KDE Histograms
+        try:
+            x_grid = np.linspace(0, 0.1, 200)
+            y_grid = np.linspace(-0.4, 0.4, 200)
+            ax_histx.plot(x_grid, gaussian_kde(dissim_clean)(x_grid), color=color, lw=1.5)
+            ax_histy.plot(gaussian_kde(delta_beta_clean)(y_grid), y_grid, color=color, lw=1.5)
+        except np.linalg.LinAlgError:
+            pass # Handle edge cases where KDE fails
+
+        # 3. Binned Error Bars (Last Realization)
+        percentiles = np.percentile(dissim_clean, np.arange(0, 101, 10))
+        digitized = np.digitize(dissim_clean, percentiles)
+
+        binned_x, binned_y, binned_yerr = [], [], []
+        for i in range(1, len(percentiles)):
+            bin_mask = (digitized == i)
+            if np.any(bin_mask):
+                binned_x.append(np.median(dissim_clean[bin_mask]))
+                binned_y.append(np.nanmean(delta_beta_clean[bin_mask]))
+                binned_yerr.append(np.nanstd(delta_beta_clean[bin_mask]))
+
+        ax_scatter.errorbar(binned_x, binned_y, yerr=binned_yerr, fmt=marker, color=color,
+                            markersize=8, label=s['name'], capsize=5, elinewidth=3)
+
+        # -------------------------------------------------------
+        # RIGHT PANEL: MC Statistics & Fitting
+        # -------------------------------------------------------
+        all_dissim = np.array(mc_results[sample_key]['binned_dissim'])
+        all_scatter = np.array(mc_results[sample_key]['binned_scatter'])
+
+        mean_dissim = np.nanmean(all_dissim, axis=0)
+        mean_scatter = np.nanmean(all_scatter, axis=0)
+        std_scatter = np.nanstd(all_scatter, axis=0)
+
+        valid = np.isfinite(mean_dissim) & np.isfinite(mean_scatter) & (mean_scatter > 0)
+        x_data, y_data, y_err = mean_dissim[valid], mean_scatter[valid], std_scatter[valid]
+
+        ax_fit.scatter(x_data, y_data, marker=marker, color=color, alpha=0.8)
+
+        # Perform chosen fit
+        if len(x_data) > 2:
+            if fit_type == 'linear':
+                weights = np.where((y_err > 0), 1.0 / y_err, 0.0)
+                coeffs, cov = np.polyfit(x_data, y_data, 1, w=weights, cov=True)
+                y_fit = np.polyval(coeffs, x_data)
+                eq_latex = r"$y = (%.2f \pm %.2f) x + (%.3f \pm %.3f)$" % (
+                    coeffs[0], np.sqrt(cov[0, 0]), coeffs[1], np.sqrt(cov[1, 1]))
+                
+            elif fit_type == 'power_law':
+                log_x, log_y = np.log10(x_data), np.log10(y_data)
+                sigma_log_y = y_err / (y_data * np.log(10))
+                weights = np.where((sigma_log_y > 0), 1.0 / sigma_log_y, 0.0)
+                coeffs, cov = np.polyfit(log_x, log_y, 1, w=weights, cov=True)
+                y_fit = 10**(np.polyval(coeffs, log_x))
+                eq_latex = r"$y = 10^{%.2f \pm %.2f} x^{%.2f \pm %.2f}$" % (
+                    coeffs[1], np.sqrt(cov[1, 1]), coeffs[0], np.sqrt(cov[0, 0]))
+
+            # Plot Fit Line and Fill
+            ax_fit.plot(x_data, y_fit, linestyle='--', color=color, label=eq_latex)
+            
+            # Save stats back to dictionary
+            s['pairs_analysis']['scatter_vs_dissimilarity_fit_coeffs'] = coeffs
+            s['pairs_analysis']['scatter_vs_dissimilarity_fit_cov'] = cov
+            s['pairs_analysis']['scatter_vs_dissimilarity_fit_type'] = fit_type
+
+        ax_fit.fill_between(x_data, y_data - y_err, y_data + y_err, color=color, alpha=0.2)
+
+    # -------------------------------------------------------
+    # Formatting and Cleanup
+    # -------------------------------------------------------
+    # Left Panel Labels and Ticks
+    ax_scatter.set_xlabel(r"$\mathcal{D}_{\rm deflector}$", fontsize=18)
+    ax_scatter.set_ylabel(r"$\Delta \beta_{E} / \beta_{E} = 1 - \beta_{\rm E, pseudo}/\beta_{\rm E, DSPL}$", fontsize=18)
+    ax_scatter.tick_params(axis='both', which='major', labelsize=14)
+    ax_scatter.set_xlim(0, 0.09)
+    ax_scatter.set_ylim(-0.43, 0.43)
+    ax_scatter.legend(frameon=True, fontsize=12)
+
+    ax_histx.axis('off')
+    ax_histy.axis('off')
+
+    # Right Panel Labels and Ticks
+    ax_fit.set_xlabel(r"$\mathcal{D}_{\rm deflector}$", fontsize=18)
+    ax_fit.set_ylabel(r"$\sigma_{\beta_{\rm E},\rm \mathcal{D}} = \sigma(\Delta \beta_{E} / \beta_{E})$", fontsize=18)
+    ax_fit.tick_params(axis='both', which='major', labelsize=14)
+    ax_fit.set_xlim(0, 0.09)
+    ax_fit.set_ylim(0, 0.24)
+    if show_fit_eqn_label:
+        ax_fit.legend(frameon=True, fontsize=10)
+
+    if save_path:
+        fig.savefig(save_path, dpi=300, bbox_inches='tight')
+        
+    return fig
+
+############################################################################
+# PLOTTING & VISUALIZATION
+############################################################################
+
+def plot_dataset_corner(pdspl_samples, samples_to_plot, key_list, key_latex_labels, plot_ranges, save_path=None):
+    """
+    Generates a combined corner plot for the base properties of multiple GGL datasets.
+    """
+    fig_corner_ref = None
+
+    for sample_key in samples_to_plot:
+        data_corner_sample = [pdspl_samples[sample_key]['table'][key] for key in key_list]
+        data_corner_sample = np.array(data_corner_sample).T
+
+        if fig_corner_ref is None:
+            fig_corner_ref = corner.corner(
+                data_corner_sample,
+                labels=[key_latex_labels[key] for key in key_list],
+                range=plot_ranges, 
+                hist_kwargs={"density": True},
+                color=pdspl_samples[sample_key]['color'],
+                smooth=1,
+                plot_datapoints=False,
+                fill_contours=True,
+                levels=(0.68, 0.95)
+            )
+        else:
+            corner.corner(
+                data_corner_sample,
+                labels=[key_latex_labels[key] for key in key_list],
+                range=plot_ranges, 
+                hist_kwargs={"density": True},
+                color=pdspl_samples[sample_key]['color'],
+                smooth=1,
+                fig=fig_corner_ref,
+                plot_datapoints=False,
+                fill_contours=True,
+                levels=(0.68, 0.95)
+            )
+
+    legend_handles = []
+    for sample_key in samples_to_plot:
+        color = pdspl_samples[sample_key]['color']
+        name = pdspl_samples[sample_key]['name']
+        patch = mpatches.Patch(color=color, alpha=0.8, label=name)
+        legend_handles.append(patch)
+
+    fig_corner_ref.legend(
+        handles=legend_handles,
+        loc='upper right',
+        bbox_to_anchor=(0.98, 0.98),
+        fontsize=18,
+        frameon=True, 
+        facecolor='white',
+        framealpha=1.0
+    )
+
+    for ax in fig_corner_ref.get_axes():
+        ax.tick_params(axis='both', which='major', labelsize=17, pad=8)
+        ax.xaxis.label.set_size(22)
+        ax.yaxis.label.set_size(22)
+        ax.title.set_size(22)
+
+    if save_path:
+        fig_corner_ref.savefig(save_path, bbox_inches='tight', dpi=300)
+        
+    return fig_corner_ref
+
+
+def plot_reldiff_corner(pdspl_samples, samples_to_plot, key_list, key_latex_labels, 
+                        figsize=(14, 14), show_multiple_titles=True, 
+                        error_type='asymmetric', title_y_spacing=0.15,
+                        custom_ranges=None, save_path=None):
+    """
+    Generates a combined corner plot for the relative difference properties of multiple samples.
+    """
+    plot_labels = [key_latex_labels.get(k, k) for k in key_list]
+    truth_values = [0.0] * len(key_list) 
+    
+    if isinstance(custom_ranges, dict):
+        corner_range = [custom_ranges.get(k, 0.99) for k in key_list]
     else:
-        iterator = enumerate(pair_indices)
+        corner_range = custom_ranges
+    
+    fig = plt.figure(figsize=figsize)
+    valid_samples = [s for s in samples_to_plot if s in pdspl_samples]
 
-    for i, (idx1, idx2) in iterator:
-
-        # z_S1 should be less than z_S2
-        if data_table[idx1]["z_S"] > data_table[idx2]["z_S"]:
-            idx1, idx2 = idx2, idx1
-
-        pairs_table["index_1"].append(idx1)
-        pairs_table["index_2"].append(idx2)
-        pairs_table["z_D1"].append(data_table[idx1]["z_D"])
-        pairs_table["z_D2"].append(data_table[idx2]["z_D"])
-        pairs_table["z_D"].append(0.5 * (data_table[idx1]["z_D"] + data_table[idx2]["z_D"]))
-        pairs_table["z_S1"].append(data_table[idx1]["z_S"])
-        pairs_table["z_S2"].append(data_table[idx2]["z_S"])
-        pairs_table["theta_E1"].append(data_table[idx1]["theta_E"])
-        pairs_table["theta_E2"].append(data_table[idx2]["theta_E"])
-        pairs_table["sigma_v_D1"].append(data_table[idx1]["sigma_v_D"])
-        pairs_table["sigma_v_D2"].append(data_table[idx2]["sigma_v_D"])
-        pairs_table["R_e_kpc_D1"].append(data_table[idx1]["R_e_kpc"])
-        pairs_table["R_e_kpc_D2"].append(data_table[idx2]["R_e_kpc"])
-        pairs_table["R_e_arcsec_D1"].append(data_table[idx1]["R_e_arcsec"])
-        pairs_table["R_e_arcsec_D2"].append(data_table[idx2]["R_e_arcsec"])
-        pairs_table["Sigma_half_Msun/pc2_D1"].append(data_table[idx1]["Sigma_half_Msun/pc2"])
-        pairs_table["Sigma_half_Msun/pc2_D2"].append(data_table[idx2]["Sigma_half_Msun/pc2"])
-        pairs_table["beta_E_pseudo"].append(data_table[idx1]["theta_E"] / data_table[idx2]["theta_E"])
-        pairs_table["gamma_pl_1"].append(data_table[idx1]["gamma_pl"])
-        pairs_table["gamma_pl_2"].append(data_table[idx2]["gamma_pl"])
-
-        # errors on z_D, sigma_v_D, R_e_arcsec, mags
-        if "err_z_D" in data_table.colnames:
-            pairs_table["err_z_D1"].append(data_table[idx1]["err_z_D"])
-            pairs_table["err_z_D2"].append(data_table[idx2]["err_z_D"])
-        if "err_sigma_v_D" in data_table.colnames:
-            pairs_table["err_sigma_v_D1"].append(data_table[idx1]["err_sigma_v_D"])
-            pairs_table["err_sigma_v_D2"].append(data_table[idx2]["err_sigma_v_D"])
-        if "err_R_e_arcsec" in data_table.colnames:
-            pairs_table["err_R_e_arcsec_D1"].append(data_table[idx1]["err_R_e_arcsec"])
-            pairs_table["err_R_e_arcsec_D2"].append(data_table[idx2]["err_R_e_arcsec"])
-
-        # calculate beta_E_DSPL
-        _beta_E_DSPL_D1 = beta_double_source_plane(
-            z_lens = data_table[idx1]["z_D"],
-            z_source_1 = data_table[idx1]["z_S"],
-            z_source_2 = data_table[idx2]["z_S"],
-            cosmo = cosmo,
+    for sample_key in valid_samples:
+        color = pdspl_samples[sample_key].get('color', '#333333')
+        table = pdspl_samples[sample_key]['pairs_analysis']['pairs_table_with_errors']
+        samples_2d = np.vstack([table[k] for k in key_list]).T
+        
+        mask = ~np.isnan(samples_2d).any(axis=1)
+        samples_2d = samples_2d[mask]
+        
+        fig = corner.corner(
+            samples_2d,
+            fig=fig,
+            labels=plot_labels,
+            range=corner_range,
+            color=color,
+            weights=np.ones(len(samples_2d)) / len(samples_2d),
+            smooth=1,
+            plot_datapoints=False,  
+            plot_density=False,     
+            fill_contours=True,    
+            show_titles=False,      
+            levels=[0.68, 0.95],    
+            hist_kwargs={"density": True, "linewidth": 2, "histtype": "step"},
+            contour_kwargs={"linewidths": 2},
+            truths=truth_values, 
+            truth_color="#444444",
+            label_kwargs={"fontsize": 16}
         )
-        _beta_E_DSPL_D2 = beta_double_source_plane(
-            z_lens = data_table[idx2]["z_D"],
-            z_source_1 = data_table[idx1]["z_S"],
-            z_source_2 = data_table[idx2]["z_S"],
-            cosmo = cosmo,
+
+    if show_multiple_titles and valid_samples:
+        ndim = len(key_list)
+        axes = np.array(fig.axes).reshape((ndim, ndim))
+        
+        for col_idx, param_key in enumerate(key_list):
+            ax = axes[col_idx, col_idx] 
+            param_label_raw = plot_labels[col_idx]
+            param_math_text = param_label_raw.replace('$', '')
+            
+            for row_idx, sample_key in enumerate(valid_samples):
+                color = pdspl_samples[sample_key].get('color', '#333333')
+                table = pdspl_samples[sample_key]['pairs_analysis']['pairs_table_with_errors']
+                samples_1d = np.array(table[param_key])
+                samples_1d = samples_1d[~np.isnan(samples_1d)]
+                
+                if error_type == 'symmetric':
+                    mean_val = np.mean(samples_1d)
+                    std_val = np.std(samples_1d)
+                    title_str = fr"${param_math_text} = {mean_val:.3f} \pm {std_val:.3f}$"
+                else:
+                    q16, q50, q84 = np.percentile(samples_1d, [16, 50, 84])
+                    lower_err = q50 - q16
+                    upper_err = q84 - q50
+                    title_str = fr"${param_math_text} = {q50:.3f}^{{+{upper_err:.3f}}}_{{-{lower_err:.3f}}}$"
+                
+                y_offset = 1.05 + (title_y_spacing * row_idx) 
+                ax.text(0.5, y_offset, title_str, transform=ax.transAxes, 
+                        ha='center', va='bottom', color=color, fontsize=12)
+
+    legend_handles = []
+    for sample_key in valid_samples:
+        name = pdspl_samples[sample_key].get('name', sample_key)
+        color = pdspl_samples[sample_key].get('color', '#333333')
+        line = mlines.Line2D([], [], color=color, linewidth=3, label=name)
+        legend_handles.append(line)
+
+    fig.legend(
+        handles=legend_handles,
+        loc='upper right',
+        bbox_to_anchor=(0.98, 0.98), 
+        bbox_transform=fig.transFigure,
+        fontsize=16,
+        frameon=False
+    )
+
+    if save_path:
+        fig.savefig(save_path, bbox_inches='tight', dpi=300)
+    return fig
+
+
+def generate_latex_summary_table(pdspl_samples, keys_to_plot):
+    """
+    Prints a formatted LaTeX summary table of the pairing analysis results,
+    reporting mean values across realizations and dynamic fit headers.
+    """
+    # Determine the fit type from the first valid sample
+    header_fit_type = "Fit" 
+    for key in keys_to_plot:
+        s = pdspl_samples.get(key)
+        if s and "pairs_analysis" in s:
+            fit_type = s["pairs_analysis"].get("scatter_vs_dissimilarity_fit_type")
+            if fit_type == "linear":
+                header_fit_type = "Linear Fit"
+            elif fit_type == "power_law":
+                header_fit_type = "PL Fit"
+            break
+
+    print(r"\begin{tabular}{l | c c c | c c}")
+    print(r"\hline")
+    print(fr"\multirow{{2}}{{*}}{{\textbf{{Sample}}}} & \multicolumn{{3}}{{c|}}{{\textbf{{Pairing at 20K deg$^2$}}}} & \multicolumn{{2}}{{c}}{{\textbf{{{header_fit_type}}}}} \\")
+    print(r" & \textbf{\# Lenses} & \textbf{Mean \# Pairs} & \textbf{Mean ${\Delta\beta_{\rm E}}/{\beta_{\rm E}}$} & \textbf{a} & \textbf{b} \\")
+    print(r"\hline")
+
+    for key in keys_to_plot:
+        s = pdspl_samples.get(key)
+        if not s or "pairs_analysis" not in s:
+            continue
+            
+        pa = s["pairs_analysis"]
+        fit_coeffs = pa.get('scatter_vs_dissimilarity_fit_coeffs', [0, 0])
+        fit_covs = pa.get('scatter_vs_dissimilarity_fit_cov', np.zeros((2,2)))
+        
+        a, b = fit_coeffs[0], fit_coeffs[1]
+        da, db = np.sqrt(fit_covs[0, 0]), np.sqrt(fit_covs[1, 1])
+        
+        # Fetch means (falling back to single realization values if means aren't present)
+        mean_pairs = pa.get('mean_num_pairs', pa.get('num_pairs', 0))
+        mean_scatter = pa.get('mean_scatter_in_beta_E', pa.get('scatter_in_beta_E', 0.0))
+        
+        print(
+            f"{s['name']} & "
+            f"{pa['num_lenses']} & "
+            f"{mean_pairs:.0f} & "
+            f"{mean_scatter:.3f} & "
+            f"{a:.2f} $\\pm$ {da:.2f} & "
+            f"{b:.2f} $\\pm$ {db:.3f} \\\\"
         )
-        beta_E_DSPL_D1 = beta2theta_e_ratio(_beta_E_DSPL_D1, gamma_pl=data_table[idx1]["gamma_pl"], lambda_mst=1)
-        beta_E_DSPL_D2 = beta2theta_e_ratio(_beta_E_DSPL_D2, gamma_pl=data_table[idx2]["gamma_pl"], lambda_mst=1)
-        pairs_table["beta_E_DSPL"].append(0.5 * (beta_E_DSPL_D1 + beta_E_DSPL_D2))
 
-        # add color_D_gr and color_D_ri
-        color_D_gr_1 = data_table[idx1]['mag_D_g'] - data_table[idx1]['mag_D_r']
-        color_D_gr_2 = data_table[idx2]['mag_D_g'] - data_table[idx2]['mag_D_r']
-        color_D_ri_1 = data_table[idx1]['mag_D_r'] - data_table[idx1]['mag_D_i']
-        color_D_ri_2 = data_table[idx2]['mag_D_r'] - data_table[idx2]['mag_D_i']
-        pairs_table["color_D_gr_1"].append(color_D_gr_1)
-        pairs_table["color_D_gr_2"].append(color_D_gr_2)
-        pairs_table["color_D_ri_1"].append(color_D_ri_1)
-        pairs_table["color_D_ri_2"].append(color_D_ri_2)
-
-        pairs_table["mag_D_i_1"].append(data_table[idx1]['mag_D_i'])
-        pairs_table["mag_D_i_2"].append(data_table[idx2]['mag_D_i'])
-
-    # make it an astropy table
-    pairs_table = Table(pairs_table)
-
-    # add a column for the fractional difference between beta_E_DSPL and beta_E_pseudo
-    pairs_table["rel_diff_beta_E"] = (
-        1 - pairs_table['beta_E_pseudo'] / pairs_table['beta_E_DSPL']
-    )
-
-    # add a column for the rel difference between sigma_v of the two lenses
-    pairs_table["rel_diff_sigma_v_D"] = 2*(pairs_table["sigma_v_D2"] - pairs_table["sigma_v_D1"]) / (pairs_table["sigma_v_D2"] + pairs_table["sigma_v_D1"])
-
-    # add a column for the rel difference between R_e of the two lenses
-    pairs_table["rel_diff_R_e_kpc"] = 2*(pairs_table["R_e_kpc_D2"] - pairs_table["R_e_kpc_D1"]) / (pairs_table["R_e_kpc_D2"] + pairs_table["R_e_kpc_D1"])
-    pairs_table["rel_diff_R_e_arcsec"] = 2*(pairs_table["R_e_arcsec_D2"] - pairs_table["R_e_arcsec_D1"]) / (pairs_table["R_e_arcsec_D2"] + pairs_table["R_e_arcsec_D1"])
-
-    # add a column for the rel difference between Sigma_half of the two lenses
-    pairs_table["rel_diff_Sigma_half"] = 2*(pairs_table["Sigma_half_Msun/pc2_D2"] - pairs_table["Sigma_half_Msun/pc2_D1"]) / (pairs_table["Sigma_half_Msun/pc2_D2"] + pairs_table["Sigma_half_Msun/pc2_D1"])
-
-    # add a column for i band magnitude difference between the two lenses
-    pairs_table['rel_diff_mag_D_i'] = 2*(pairs_table['mag_D_i_2'] - pairs_table['mag_D_i_1']) / (pairs_table['mag_D_i_2'] + pairs_table['mag_D_i_1'])
-
-    # relative difference in colors between the two deflectors
-    pairs_table['rel_diff_color_D_gr'] = 2*(pairs_table['color_D_gr_2'] - pairs_table['color_D_gr_1']) / (pairs_table['color_D_gr_2'] + pairs_table['color_D_gr_1'])
-    pairs_table['rel_diff_color_D_ri'] = 2*(pairs_table['color_D_ri_2'] - pairs_table['color_D_ri_1']) / (pairs_table['color_D_ri_2'] + pairs_table['color_D_ri_1'])
-
-    # add a column for the rel difference between z_D of the two lenses
-    pairs_table["rel_diff_z_D"] = 2*(pairs_table["z_D2"] - pairs_table["z_D1"]) / (pairs_table["z_D2"] + pairs_table["z_D1"])
-
-    # add a column for the rel difference between gamma_pl of the two lenses
-    pairs_table["rel_diff_gamma_pl"] = 2*(pairs_table["gamma_pl_2"] - pairs_table["gamma_pl_1"]) / (pairs_table["gamma_pl_2"] + pairs_table["gamma_pl_1"])
-
-    return pairs_table
-
-def create_pairs_table(table, pairing_keys, cosmo, progress_bar=False):
-    """
-    Pairs lenses from a given table based on specific parameter keys.
-    
-    Parameters:
-    -----------
-    table : astropy.table.Table or pandas.DataFrame
-        The input table containing the lens data.
-    pairing_keys : list of str
-        The column names to be used for finding pairs (e.g., ['z_D', 'sigma_v_D']).
-    cosmo : astropy.cosmology object
-        The cosmology required to compute distances/beta parameters in get_pairs_table_PDSPL.
-    progress_bar : bool, optional
-        Whether to show a progress bar in get_pairs_table_PDSPL. Default is False.
-        
-    Returns:
-    --------
-    pairs_table : astropy.table.Table or pandas.DataFrame
-        A table containing the paired lenses and their combined properties.
-    """
-    
-    # 1. Normalize and stack the features into a multi-dimensional space
-    points = np.stack(
-        [normalize_data(table[pk], type='zscore') for pk in pairing_keys],
-        axis=1
-    )
-    
-    # 2. Find pair indices using the KD-tree matcher
-    indices, _ = kdtree_matching_n_dim(
-        points=points, 
-        n_neighbors=2, 
-        unique_pairs=True
-    )
-    
-    # 3. Build the final pairs table using your predefined PDSPL function
-    pairs_table = get_pairs_table_PDSPL(
-        table, 
-        pair_indices=indices, 
-        cosmo=cosmo, 
-        progress_bar=progress_bar
-    )
-    
-    return pairs_table
-#############################################################################
-
-
-
-#############################################################################
-# PRIORS
-#############################################################################
-# class CustomPrior(object):
-#     def __init__(self, log_scatter=False, anisotropy='const'):
-#         """Customized prior distribution
-
-#         Args:
-#             log_scatter (bool, optional): _description_. Defaults to False.
-#             anisotropy (str, optional): _description_. Defaults to 'const'.
-#         """
-#         self._log_scatter = log_scatter
-#         # we use flat priors on constant anisotropy, and 1/a_ani prior for Osipkov-Merrit anisotropy
-#         if anisotropy == 'const': 
-#             self._ani_log = False
-#         else:
-#             self._ani_log = True
-
-
-#     def __call__(self, kwargs_cosmo, kwargs_lens, kwargs_kin, kwargs_source, kwargs_los):
-#         return self.log_likelihood(kwargs_cosmo, kwargs_lens, kwargs_kin, kwargs_source, kwargs_los)
-
-#     def log_likelihood(self, kwargs_cosmo, kwargs_lens, kwargs_kin, kwargs_source, kwargs_los):
-
-#         logL = 0
-
-#         if self._log_scatter is True:
-#             lambda_mst_sigma = kwargs_lens.get('lambda_mst_sigma', 1)
-#             logL += np.log(1/lambda_mst_sigma)
-#             a_ani_sigma = kwargs_kin.get('a_ani_sigma', 1)
-#             logL += np.log(1/a_ani_sigma)
-#             sigma_v_sys_error = kwargs_kin.get('sigma_v_sys_error', 1)
-#             logL += np.log(1/sigma_v_sys_error)
-#         if self._ani_log is True:
-#             a_ani = kwargs_kin.get('a_ani', 1)
-#             logL += np.log(1/a_ani)
-#         return logL
-
-class OmegaMPrior(object):
-    def __init__(self, mean, sigma):
-        """
-        Gaussian prior on Omega_m.
-        
-        Args:
-            mean (float): Target mean for Omega_m (e.g., 0.3)
-            sigma (float): Gaussian width (e.g., 0.05)
-        """
-        self._mean = mean
-        self._sigma = sigma
-
-    def __call__(self, kwargs_cosmo, kwargs_lens, kwargs_kin, kwargs_source, kwargs_los):
-        """
-        This method is called by CosmoLikelihood inside the MCMC loop.
-        """
-        # Extract the current value of Omega_m being sampled
-        om = kwargs_cosmo['om']
-        
-        # Calculate the Gaussian Log-Likelihood
-        # We ignore the normalization constant as it doesn't affect the MCMC sampler
-        logL = -0.5 * ((om - self._mean) / self._sigma)**2
-        
-        return logL
+    print(r"\hline")
+    print(r"\end{tabular}")
