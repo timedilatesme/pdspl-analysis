@@ -191,37 +191,39 @@ def get_pairs_table_PDSPL(data_table, pair_indices, cosmo):
             
     return pt
 
-def inject_observational_errors(table, sample_key):
-    """Generates a new table with added Gaussian noise based on sample assumptions."""
+def inject_observational_errors(table, error_config):
+    """
+    Generates a new table with added Gaussian noise based on a provided configuration.
+    
+    Parameters
+    ----------
+    table : astropy.table.Table
+        The input data table.
+    error_config : dict
+        A dictionary mapping column names to error specifications.
+        Values can be:
+        - A callable (e.g., lambda function) taking the table as input.
+        - A float/int (constant error for all rows).
+        - An array-like of the same length as the table.
+    """
     noisy_table = table.copy()
     
-    # z_D errors
-    if sample_key in ['lsst_y1', 'lsst_y10']:
-        err_z_D = 0.03 * (1 + table['z_D']) # Photo-z
-    elif sample_key in ['lsst_4most_spec-z', 'lsst_4most_spec-z_sigma_v']:
-        err_z_D = np.full(len(table), 1e-4) # Spec-z
-    else:
-        err_z_D = np.zeros(len(table))
+    for col, err_spec in error_config.items():
+        if col not in table.colnames:
+            continue
+            
+        # Determine the error array based on the spec type
+        if callable(err_spec):
+            err_array = err_spec(table)
+        elif isinstance(err_spec, (int, float)):
+            err_array = np.full(len(table), float(err_spec))
+        else:
+            err_array = np.array(err_spec)
+            
+        # Inject Gaussian noise and save the error column
+        noisy_table[col] += np.random.normal(0, err_array)
+        noisy_table[f'err_{col}'] = err_array
         
-    noisy_table['z_D'] += np.random.normal(0, err_z_D)
-    noisy_table['err_z_D'] = err_z_D
-
-    # sigma_v_D errors
-    err_sigma = np.full(len(table), 10.0)
-        
-    noisy_table['sigma_v_D'] += np.random.normal(0, err_sigma)
-    noisy_table['err_sigma_v_D'] = err_sigma
-
-    # R_e errors
-    err_R_e = 0.05 * table['R_e_arcsec']
-    noisy_table['R_e_arcsec'] += np.random.normal(0, err_R_e)
-    noisy_table['err_R_e_arcsec'] = err_R_e
-
-    # Magnitude errors
-    err_mag = 1e-3 # millimag precision
-    noisy_table['mag_D_i'] += np.random.normal(0, err_mag)
-    noisy_table['err_mag_D_i'] = err_mag
-    
     return noisy_table
 
 def compute_dissimilarity(pairs_table, dissimilarity_keys, method='rms'):
@@ -498,11 +500,11 @@ def plot_dataset_corner(pdspl_samples, samples_to_plot, key_list, key_latex_labe
         
     return fig_corner_ref
 
-
 def plot_reldiff_corner(pdspl_samples, samples_to_plot, key_list, key_latex_labels, 
                         figsize=(14, 14), show_multiple_titles=True, 
                         error_type='asymmetric', title_y_spacing=0.15,
-                        custom_ranges=None, save_path=None):
+                        custom_ranges=None, save_path=None,
+                        label_fontsize=22, tick_fontsize=16, legend_fontsize=20):
     """
     Generates a combined corner plot for the relative difference properties of multiple samples.
     """
@@ -542,7 +544,7 @@ def plot_reldiff_corner(pdspl_samples, samples_to_plot, key_list, key_latex_labe
             contour_kwargs={"linewidths": 2},
             truths=truth_values, 
             truth_color="#444444",
-            label_kwargs={"fontsize": 16}
+            label_kwargs={"fontsize": label_fontsize} # Updated axis label size
         )
 
     if show_multiple_titles and valid_samples:
@@ -571,8 +573,18 @@ def plot_reldiff_corner(pdspl_samples, samples_to_plot, key_list, key_latex_labe
                     title_str = fr"${param_math_text} = {q50:.3f}^{{+{upper_err:.3f}}}_{{-{lower_err:.3f}}}$"
                 
                 y_offset = 1.05 + (title_y_spacing * row_idx) 
+                # Slightly increased the title font size here as well to match the new scaling
                 ax.text(0.5, y_offset, title_str, transform=ax.transAxes, 
-                        ha='center', va='bottom', color=color, fontsize=12)
+                        ha='center', va='bottom', color=color, fontsize=label_fontsize - 4)
+
+    # Loop through all axes to increase tick label sizes and optionally rotate them
+    for ax in fig.axes:
+        ax.tick_params(axis='both', which='both', labelsize=tick_fontsize, direction='in')
+        
+        # When tick fonts get larger, x-axis labels tend to overlap. 
+        # Setting rotation to 45 degrees helps prevent this.
+        if ax.get_xticklabels():
+            plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
 
     legend_handles = []
     for sample_key in valid_samples:
@@ -586,7 +598,7 @@ def plot_reldiff_corner(pdspl_samples, samples_to_plot, key_list, key_latex_labe
         loc='upper right',
         bbox_to_anchor=(0.98, 0.98), 
         bbox_transform=fig.transFigure,
-        fontsize=16,
+        fontsize=legend_fontsize, # Updated legend size
         frameon=False
     )
 
@@ -615,7 +627,7 @@ def generate_latex_summary_table(pdspl_samples, keys_to_plot):
     print(r"\begin{tabular}{l | c c c | c c}")
     print(r"\hline")
     print(fr"\multirow{{2}}{{*}}{{\textbf{{Sample}}}} & \multicolumn{{3}}{{c|}}{{\textbf{{Pairing at 20K deg$^2$}}}} & \multicolumn{{2}}{{c}}{{\textbf{{{header_fit_type}}}}} \\")
-    print(r" & \textbf{\# Lenses} & \textbf{Mean \# Pairs} & \textbf{Mean ${\Delta\beta_{\rm E}}/{\beta_{\rm E}}$} & \textbf{a} & \textbf{b} \\")
+    print(r" & \textbf{\# Lenses} & \textbf{Mean \# Pairs} & \textbf{Mean ${\Delta\beta_{\rm E}}/{\beta_{\rm E}}$} & \textbf{$\sigma_{\beta_{\rm E},\rm \mathcal{D}}^{(0)}$} & \textbf{$\sigma_{\beta_{\rm E},\rm \mathcal{D}}^{(1)}$} \\")
     print(r"\hline")
 
     for key in keys_to_plot:
@@ -639,8 +651,8 @@ def generate_latex_summary_table(pdspl_samples, keys_to_plot):
             f"{pa['num_lenses']} & "
             f"{mean_pairs:.0f} & "
             f"{mean_scatter:.3f} & "
-            f"{a:.2f} $\\pm$ {da:.2f} & "
-            f"{b:.2f} $\\pm$ {db:.3f} \\\\"
+            f"{b:.2f} $\\pm$ {db:.3f} & "
+            f"{a:.2f} $\\pm$ {da:.2f} \\\\"
         )
 
     print(r"\hline")

@@ -149,11 +149,18 @@ def draw_lens_from_given_zs(z_lens, z1, z2,
     dy_dlambda = mu_model * (1 - beta_geo) / ((gamma_pl_mean - 1.0) * U)
     dy_dgamma = - mu_model * np.log(U) / ((gamma_pl_mean - 1.0)**2)
     
-    err_zl = redshift_error_rel * (1.0 + z_lens)
-    err_zs1 = redshift_error_rel * (1.0 + z1)
-    err_zs2 = redshift_error_rel * (1.0 + z2)
+    if isinstance(redshift_error_rel, (int, float)):
+        err_zl = redshift_error_rel * (1.0 + z_lens)
+        err_zs1 = redshift_error_rel * (1.0 + z1)
+        err_zs2 = redshift_error_rel * (1.0 + z2)
+    if isinstance(redshift_error_rel, (list, np.ndarray, tuple)):
+        err_zl = redshift_error_rel[0] * (1.0 + z_lens)
+        err_zs1 = redshift_error_rel[1] * (1.0 + z1)
+        err_zs2 = redshift_error_rel[2] * (1.0 + z2)
+    else:
+        err_zl, err_zs1, err_zs2 = 0.0, 0.0, 0.0
     
-    if redshift_error_rel > 0:
+    if err_zl > 0 or err_zs1 > 0 or err_zs2 > 0:
         dbeta_dzl, dbeta_dzs1, dbeta_dzs2 = get_beta_z_derivatives(z_lens, z1, z2, cosmo)
         dmu_dbeta_fid = (mu_model / ((gamma_pl_mean - 1.0) * U)) * (2.0 - lambda_mst_mean)
         sigma_photoz_fid_sq = (dmu_dbeta_fid * dbeta_dzl * err_zl)**2 + \
