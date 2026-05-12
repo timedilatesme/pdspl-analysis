@@ -2,13 +2,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 import corner
 import matplotlib.lines as mlines
-
+import matplotlib.colors as mcolors
 
 def plot_dspl_corner(scenarios, truth, fixed_params, scenarios_to_plot=None, 
                      custom_ranges=None, latex_labels=None, figsize=(16, 16),
                      show_multiple_titles=True, error_type='asymmetric',
                      title_y_spacing=0.18, samples_key='samples', custom_linestyles_dict=None,
+                     custom_linewidths_dict=None,
                      custom_colors_dict=None, 
+                     custom_fill_contours_dict=None,
+                     custom_alphas_dict=None,
                      save_path=None, titles_fontsize=13):
     """
     Generates a combined corner plot for multiple MCMC scenarios with custom stacked titles.
@@ -32,7 +35,16 @@ def plot_dspl_corner(scenarios, truth, fixed_params, scenarios_to_plot=None,
     colors_for_valid_scenarios = [scenarios[key]['color'] if custom_colors_dict is None else custom_colors_dict.get(key, scenarios[key]['color']) for key in valid_scenarios]
     if custom_linestyles_dict is None:
         custom_linestyles_dict = {}
+    if custom_linewidths_dict is None:
+        custom_linewidths_dict = {}
+    if custom_fill_contours_dict is None:
+        custom_fill_contours_dict = {}
+    if custom_alphas_dict is None:
+        custom_alphas_dict = {}
     linestyles_for_valid_scenarios = [custom_linestyles_dict.get(key, '-') for key in valid_scenarios]
+    linewidths_for_valid_scenarios = [custom_linewidths_dict.get(key, 2.5) for key in valid_scenarios]
+    contour_fill_options_for_valid_scenarios = [custom_fill_contours_dict.get(key, True) for key in valid_scenarios]
+    alphas_for_valid_scenarios = [custom_alphas_dict.get(key, 1.0) for key in valid_scenarios]
 
     # 2. Draw Contours
     for key in valid_scenarios:
@@ -42,7 +54,21 @@ def plot_dspl_corner(scenarios, truth, fixed_params, scenarios_to_plot=None,
         
         current_color = colors_for_valid_scenarios[idx]
         current_ls = linestyles_for_valid_scenarios[idx]
+        current_lw = linewidths_for_valid_scenarios[idx]
+        current_fill_contours = contour_fill_options_for_valid_scenarios[idx]
+        current_alpha = alphas_for_valid_scenarios[idx]
+
+        # Extract the RGB values of the current color
+        base_rgb = mcolors.to_rgb(current_color)
         
+        # Scale ONLY the fill opacities by the user's custom overall alpha
+        rgba_bg    = (*base_rgb, 0.0)  
+        rgba_outer = (*base_rgb, 0.3 * current_alpha)  
+        rgba_inner = (*base_rgb, 1.0 * current_alpha)  
+        
+        c_kwargs = {"colors": [rgba_bg, rgba_outer, rgba_inner]} if current_fill_contours else {}
+
+
         fig = corner.corner(
             sc[samples_key],
             fig=fig,
@@ -56,12 +82,13 @@ def plot_dspl_corner(scenarios, truth, fixed_params, scenarios_to_plot=None,
             
             plot_datapoints=False,  
             plot_density=False,     
-            fill_contours=True,    
+            fill_contours=current_fill_contours,  
             show_titles=False,      
+            contourf_kwargs=c_kwargs,
             
             levels=[0.68, 0.95],    
-            hist_kwargs={"linewidth": 2.5, "linestyle": current_ls},
-            contour_kwargs={"linewidths": 2.5, "linestyles": current_ls},
+            hist_kwargs={"linewidth": current_lw, "linestyle": current_ls},
+            contour_kwargs={"linewidths": current_lw, "linestyles": current_ls, "alpha": current_alpha},
             
             truths=truth_values, 
             truth_color="#444444",
@@ -120,7 +147,7 @@ def plot_dspl_corner(scenarios, truth, fixed_params, scenarios_to_plot=None,
     legend_handles = []
     for key in valid_scenarios:
         sc = scenarios[key]
-        line = mlines.Line2D([], [], color=colors_for_valid_scenarios[valid_scenarios.index(key)], linewidth=3, 
+        line = mlines.Line2D([], [], color=colors_for_valid_scenarios[valid_scenarios.index(key)], linewidth=linewidths_for_valid_scenarios[valid_scenarios.index(key)], 
                              label=f"{sc['name']}", linestyle=custom_linestyles_dict.get(key, '-'))
         legend_handles.append(line)
 
