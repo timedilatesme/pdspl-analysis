@@ -1,0 +1,108 @@
+--------------------------------------------
+Major Changes to the Manuscript
+--------------------------------------------
+1. We have updated the baseline hierarchical MCMC inference to treat the intrinsic population scatters for the power-law slope and mass-sheet parameter as fully free, marginalized parameters.
+
+2. We replaced the pessimistic "87 DSPLs" benchmark with a new simulated mock catalog of 500 genuine DSPLs to provide a fairer comparison against the PDSPL method.
+
+3. We have refined our galaxy-galaxy lens sample selection criteria (in Section 4.6 and Table 1) to be consistent with previous work by Collett et al. (2015).
+
+4. Added a new Appendix A that details a forecasting trick (Likelihood scaling and Asimov dataset) we used to efficiently compute cosmological posteriors for large samples of pairs without needing to run a full MCMC for each pair, which was critical for generating the forecasts in this paper.
+
+5. Added a new Appendix B with comprehensive forecasts for the LSST Y10 sample assuming widespread spectroscopic follow-up, demonstrating how spec-z data lowers intrinsic pairing scatter and tightens cosmological constraints.
+
+6. Added a new Appendix C that shows self-calibration of scatter in beta_E due to deflector pair dissimilarity.
+
+7. Rewrote Section 6.1 to explicitly highlight that the primary advantage of PDSPLs is circumventing the unmeasurable secondary mass-sheet degeneracy of the intermediate source.
+
+8. Added a brand new "Systematic Uncertainties" section (Section 6.4) detailing the systematic noise floor, including environmental variations, photo-z evolution, and selection bias.
+
+9. Expanded Section 6.2 to physically justify why the 4MOST sample yields tighter pairs than LSST Y10, citing the SLACS X analysis to explain how massive ellipticals strictly adhere to the Mass Fundamental Plane.
+
+10. Added a new corner plot (Figure 5) that explicitly shows the histograms of the relative fractional differences (e.g., redshift, effective radius, magnitudes) for all paired deflectors.
+
+11. Added a clarifying paragraph to end of Section 3.3 stating that the DSPL mathematical formalism presented here explicitly assumes an idealized scenario where the intermediate source mass is neglected.
+
+12. There was a minor bug in the code due to which 4MOST (spec-z + sigma-v) scenario used exact same random error on sigma_v for all systems instead of the intended gaussian error with 10% dispersion, which must be different for each system. This has been fixed, and the scatter for this scenario is now higher (similar to the spec-z only case), but the overall conclusions remain unchanged. The main driver of scatter reduction is the spectroscopic redshifts, not the velocity dispersions.
+
+--------------------------------------------
+Replies to Tian Li's Comments
+--------------------------------------------
+
+1. Comparison to "87 from LSST" benchmark
+Reply: We removed the pessimistic 87 DSPL benchmark and replaced it with a much more optimistic mock catalog of 500 genuine DSPLs for comparison (from appendix in Shajib et al. 2024). This is detailed in Section 5.3 and shown in the results in Figure 7. We also clarified in the paper that these DSPLs are idealized and assume no mass for the intermediate source.
+
+2. Highlight unmeasurable "source-1 MST" as the main advantage
+Reply: We expanded Section 6.1 (Geometric Simplicity and Avoiding Intermediate Source MST) to explicitly highlight that the unmeasurable secondary mass-sheet degeneracy of the intermediate source is the critical bottleneck for true DSPLs, which our PDSPL method avoids.
+
+3. Clarify assumption of no mass in the first source plane (Section 3.2)
+Reply: We added a clarifying paragraph at the end of Section 3.3 explicitly stating that the formalism assumes an idealized DSPL scenario where the intermediate source is treated purely as a luminous background object with neglected mass.
+
+4. Weighted distance metric remark (Section 4.3)
+Reply: Below Equation 4.8, we added a remark stating that a weighted distance metric is a natural and necessary extension for real data, and we point the reader to an expanded discussion on this in Section 6.2.
+
+5. Relaxing the assumption of fixing intrinsic scatters of gamma and lambda
+Reply: We completely updated our baseline hierarchical analysis (Section 5.4) so that the intrinsic population scatters of gamma and lambda are now treated as entirely free parameters and marginalized over. The presented cosmological constraints already include this degradation.
+
+6. Typical values of redshift, magnitude, and size differences for pairs
+Reply: We added Figure 5 to Section 4.7, which is a corner plot explicitly showing the histograms and distributions of the relative fractional differences (delta z / z, delta R_e / R_e, etc.) for all paired deflectors across our samples.
+
+7. Correlation of power-law slope with photometric observables / SLACS X
+Reply: In Section 6.2 (The Conservative Nature of the Noise Floor), we explicitly discuss how the power-law slope is physically linked to macroscopic structure (size and central mass density) and cite the SLACS X (Auger et al. 2010) paper and its Figure 5.
+
+
+
+--------------------------------------------
+Replies to Adam Bolton's Comments
+--------------------------------------------
+
+1. Global population hyperparameterization vs explicit pairing
+Reply: While a global population approach is a highly valuable technique, we chose to focus on explicit geometric pairing to strictly isolate the distance-ratio cosmology and preserve the traditional DSPL formalism. The main advantage of this approach is that we only care about the relative differences between paired deflectors, which allows us to directly leverage the tight scaling relations of massive ellipticals to suppress scatter. A global population approach would require modeling the full distribution of all observables and their covariances, which is a much more complex problem. Thus, we maintain the pairing approach in the text.
+
+2. Systematic floor for PDSPL cosmology
+Reply: We have added a new section, Section 6.4 (Systematic Uncertainties), which explicitly lists the systematic errors this method is susceptible to, including photometric-to-mass mapping, environmental variations, photo-z evolution, and selection bias. Because we only care about relative differences between paired deflectors, many systematic errors that affect absolute mass calibration are largely mitigated.
+
+Regarding the systematic floor, while a rigorous derivation requires full forward modeling, we estimate it to be ~1% to 2% on beta_E. This is primarily driven by unmodeled differences in external convergence (e.g., ~1% scatter per Johnson et al. 2025) and redshift-dependent evolution in the photometric-to-mass mapping. However, the massive statistical volume of the PDSPL framework allows us to introduce nuisance parameters for these effects. By self-calibrating and marginalizing over them during the hierarchical inference, we can effectively trade a hard systematic bias for a manageable increase in statistical uncertainty which would probably still be much smaller compared to the dissimilarity scatter in beta_E.
+
+3. Anisotropic Dissimilarity Weighting and Covariances
+Reply: In Section 6.2, we expanded the weighting discussion to explicitly note that observables like effective radius and magnitude possess significant intrinsic covariances, proposing a generalized Mahalanobis-like distance metric for future iterations.
+
+*4. Pairing Logic (Are some left unpaired / Multiple pairings?)
+Reply: Our kD-Tree algorithm queries the nearest neighbor for *every* individual deflector, meaning no deflector is left completely unpaired. However, because nearest-neighbor matches are not always reciprocal (e.g., Galaxy A matches B, but C also matches A), the algorithm naturally allows for multiple pairings of the same galaxy. This is beneficial as it maximizes our total statistical sample size. 
+
+Regarding the gain from excluding poor pairs: instead of strictly excluding them, our likelihood function naturally down-weights them. It does this by parameterizing their variance ($\sigma_{\beta_E, \mathcal{D}}$) as a function of their dissimilarity ($\mathcal{D}$), allowing us to use the full dataset without being overwhelmed by noisy matches.
+
+The plot below shows that each deflector is indeed paired with at least one other deflector.
+
+[Pairing completeness plot]
+
+
+5. Realistic relationship between mass and light parameters in simulation
+Reply: Author's Reply: 
+Yes, the simulation employs highly realistic, empirically calibrated relationships. As implemented in the SLSim framework (Khadka et al. 2026), our mock deflector catalogs assign mass parameters (such as central velocity dispersion) to photometric profiles using SDSS-calibrated abundance matching and established scaling relations (e.g., the $L-\sigma$ relation). Furthermore, the photometric and structural parameters are drawn from observationally constrained distributions via the SkyPy pipeline, ensuring that the simulated population accurately reflects the intrinsic parameter relationships observed in real galaxy surveys.
+
+6. Selection bias (minimum Einstein radius threshold)
+Author's Reply: Thank you for highlighting this important point; this is now explicitly discussed in our new Section 6.4 (Systematic Uncertainties). We note that survey detectability criteria indeed create a Malmquist-like bias by preferentially selecting systems that scatter upward in deflection angle. We already see this effect in our simulated populations: for 4MOST-based samples where we strictly select bright deflector galaxies, the intrinsic scatter is lower (~10%) compared to the broader case where we supply LSST Y10 with spec-z's (~15%, see Appendix B), indicating that selection cuts directly influence the pairing fidelity.
+
+As for the cosmological inference, because the PDSPL observable ($\beta_E$) is fundamentally a ratio of two Einstein radii, an absolute upward scatter in mass might partially cancel out between a paired deflector. However, this cancellation is not perfect. The minimum $\theta_E$ detectability threshold affects systems differently depending on their source redshifts—for instance, a lens with a lower source redshift requires a more extreme upward scatter in its mass profile to clear the threshold than an identical deflector with a higher source redshift. 
+
+This differential selection effect introduces a redshift-dependent bias that systematically skews the inferred population mass parameters (such as the mean power-law slope and MST parameter) which directly propagates into the cosmological constraints. While we do not explicitly attempt to correct for this bias in our current simulation (as our forecast utilizes Asimov datasets to establish the theoretical statistical bounds of the methodology), we have explicitly noted in Section 6.4 that rigorous forward-modeling of the survey selection function will be a mandatory requirement when applying this framework to observational data, much like it currently is for single-lens cosmography and time-delay measurements.
+
+7. Quantifying "1 spec pair is worth X phot pairs"
+Reply: One way to quantify this is to compare the irreducible scatter in beta_E for the photometric scenario vs the spectroscopic scenario. 
+For N_photo pairs and N_spec pairs, the effective scatter for each scenario is:
+sigma_eff_photo = sigma_photo / sqrt(N_photo)
+sigma_eff_spec = sigma_spec / sqrt(N_spec)
+To achieve the same effective scatter, we can set sigma_eff_photo = sigma_eff_spec, which gives:
+N_photo / N_spec = (sigma_photo / sigma_spec)^2 ~ (0.19 / 0.10)^2 ~ 3.27
+Thus, roughly speaking, 1 spec pair is worth about 3.27 photometric pairs in terms of reducing the effective scatter in beta_E.
+This is just an approximate quantification as dissimilarity scatter contributes most of the noise floor, but it gives a rough sense of the relative value of spectroscopic pairs.
+
+8. Constraints assuming spec-z for all 100k LSST Y10 pairs
+Reply: We generated these exact forecasts and added a new Appendix B exploring the impact of spectroscopic redshifts on PDSPL cosmology, showing the ultimate theoretical limits if all LSST Y10 lenses had spectroscopic follow-up for both the cases where (a) if only deflectors have spectroscopic redshifts or (b) if both deflectors and sources have spectroscopic redshifts.
+
+9. Resolve red author notes-to-self
+Reply: All red drafting notes and comments have been resolved and removed from the manuscript.
+
+10. Change "high degree" to "higher degree"
+Reply: This typo was corrected in Section 4.5.
