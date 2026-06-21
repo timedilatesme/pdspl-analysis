@@ -1,9 +1,12 @@
+# pdspl_utils/inference.py
+
 """
 dspl_inference.py
 A complete, unified toolkit for Double Source Plane Lens (DSPL) cosmology.
 Handles constant scatters, heteroscedastic scatters, and arbitrary fixed parameters seamlessly.
 """
 
+import os
 import numpy as np
 import emcee
 from astropy.cosmology import Flatw0waCDM
@@ -153,7 +156,7 @@ def draw_lens_from_given_zs(z_lens, z1, z2,
         err_zl = redshift_error_rel * (1.0 + z_lens)
         err_zs1 = redshift_error_rel * (1.0 + z1)
         err_zs2 = redshift_error_rel * (1.0 + z2)
-    if isinstance(redshift_error_rel, (list, np.ndarray, tuple)):
+    elif isinstance(redshift_error_rel, (list, np.ndarray, tuple)):
         err_zl = redshift_error_rel[0] * (1.0 + z_lens)
         err_zs1 = redshift_error_rel[1] * (1.0 + z1)
         err_zs2 = redshift_error_rel[2] * (1.0 + z2)
@@ -295,10 +298,20 @@ class DSPLLikelihood:
         # 1. Unified Variance Components
         dy_dlam, dy_dgam = self.get_derivatives(beta_geo, p['lambda_int'], p['gamma_pl'], model_mu)
         
-        c0 = p.get('beta_c0', 0.0)
-        c1 = p.get('beta_c1', 0.0)
-        c2 = p.get('beta_c2', 0.0)
-        sigma_beta_int_lens = c0 + c1 * self.dissimilarity + c2 * (self.dissimilarity**2)
+        # OLD: Linear polynomial model
+        # ----------------------------------------------------------------------
+        # c0 = p.get('beta_c0', 0.0)
+        # c1 = p.get('beta_c1', 0.0)
+        # c2 = p.get('beta_c2', 0.0)
+        # sigma_beta_int_lens = c0 + c1 * self.dissimilarity + c2 * (self.dissimilarity**2)
+
+        # NEW: Quadrature summation
+        # ----------------------------------------------------------------------
+        c0 = p.get('beta_c0', 0.0) # Intrinsic scatter floor
+        c1 = p.get('beta_c1', 0.0) # Dissimilarity slope
+        
+        sigma_beta_int_lens = np.sqrt(c0**2 + (c1 * self.dissimilarity)**2)
+        # ----------------------------------------------------------------------
         
         sigma_pop_sq = (dy_dlam * p.get('lambda_sigma', 0.0))**2 + \
                        (dy_dgam * p.get('gamma_sigma', 0.0))**2 + \
@@ -338,7 +351,7 @@ class DSPLLikelihood:
 
 def run_dspl_inference(kwargs_dspl_list, n_walkers=32, n_steps=1000, n_burn=200, 
                        initial_guess=None, initial_scatter=None, priors=None, 
-                       fixed_params=None, backend_path=None):
+                       fixed_params=None, backend_path=None, num_cpus=None):
     """
     Initializes and executes the emcee EnsembleSampler.
 
@@ -403,7 +416,10 @@ def run_dspl_inference(kwargs_dspl_list, n_walkers=32, n_steps=1000, n_burn=200,
     else:
         backend = None
 
-    with Pool() as pool:
+    if num_cpus is None:
+        num_cpus = os.cpu_count() - 2 if os.cpu_count() is not None else 1
+        num_cpus = min(num_cpus, 8)
+    with Pool(processes=num_cpus) as pool:
         sampler = emcee.EnsembleSampler(n_walkers, ndim, like.log_probability, pool=pool, backend=backend)
         sampler.run_mcmc(p0, n_steps, progress=True)
 
