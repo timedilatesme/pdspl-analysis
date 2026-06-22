@@ -56,3 +56,5 @@ def preprocess_ggl_table(filepath):
         table.rename_column("size_D", "R_e_arcsec")
 
     return table
+
+

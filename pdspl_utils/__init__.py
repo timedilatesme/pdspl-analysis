@@ -22,6 +22,7 @@ from .inference import (
     draw_lens_from_given_zs,
     DSPLLikelihood,
     run_dspl_inference,
+    check_mcmc_convergence,
 )
 from .plotting import plot_dspl_corner
 
@@ -48,6 +49,7 @@ __all__ = [
     "draw_lens_from_given_zs",
     "DSPLLikelihood",
     "run_dspl_inference",
+    "check_mcmc_convergence",
     # plotting
     "plot_dspl_corner",
 ]

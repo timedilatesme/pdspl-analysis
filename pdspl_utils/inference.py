@@ -25,7 +25,7 @@ from multiprocessing import Pool
 # 1. PHYSICS FUNCTIONS
 # ---------------------------------------------------------------------------
 
-def beta_double_source_plane(z_lens, z_source_1, z_source_2, cosmo):
+def original_beta_double_source_plane(z_lens, z_source_1, z_source_2, cosmo):
     """
     Geometric scaling factor β for a double source plane configuration.
 
@@ -50,6 +50,54 @@ def beta_double_source_plane(z_lens, z_source_1, z_source_2, cosmo):
     dds2 = cosmo.angular_diameter_distance_z1z2(z_lens, z_source_2).value
 
     return (dds1 / ds1) * (ds2 / dds2)
+
+def fast_beta_double_source_plane(z_lens, z_source_1, z_source_2, cosmo, n_grid=1000):
+    """
+    Optimized geometric scaling factor β for a double source plane configuration.
+    Uses 1D interpolation and flat-universe mathematical simplification.
+    """
+    z_lens     = np.atleast_1d(z_lens)
+    z_source_1 = np.atleast_1d(z_source_1)
+    z_source_2 = np.atleast_1d(z_source_2)
+
+    # Safety Fallback: The simplified math only works if Omega_k = 0
+    # If the universe isn't flat, OR if we are evaluating fewer than 50 systems 
+    # at a time (e.g., during the mock generation loop), interpolation is actually 
+    # slower. Fall back to the exact calculation.
+    if not cosmo.is_flat or len(z_lens) < 50:
+        return original_beta_double_source_plane(z_lens, z_source_1, z_source_2, cosmo)
+
+    # 1. Determine the maximum redshift to bound our interpolation grid
+    max_z = np.max([np.max(z_lens), np.max(z_source_1), np.max(z_source_2)])
+
+    # 2. Build the grid (evaluate Astropy integrals n_grid times instead of N_systems)
+    z_grid = np.linspace(0.0, max_z + 0.1, n_grid)
+    Dc_grid = cosmo.comoving_distance(z_grid).value
+
+    # 3. Instantly interpolate the distances for all systems
+    Dc_l  = np.interp(z_lens, z_grid, Dc_grid)
+    Dc_s1 = np.interp(z_source_1, z_grid, Dc_grid)
+    Dc_s2 = np.interp(z_source_2, z_grid, Dc_grid)
+
+    # 4. Vectorized geometric scaling factor (Flat universe simplification)
+    return (1.0 - Dc_l / Dc_s1) / (1.0 - Dc_l / Dc_s2)
+    
+def beta_double_source_plane(z_lens, z_source_1, z_source_2, cosmo):
+    """
+    Geometric scaling factor β for a double source plane configuration.
+
+    β = (D_{ds1}/D_{s1}) · (D_{s2}/D_{ds2})
+
+    Parameters
+    ----------
+    z_lens, z_source_1, z_source_2 : float or array-like
+    cosmo : astropy.cosmology instance
+
+    Returns
+    -------
+    float or numpy.ndarray
+    """
+    return fast_beta_double_source_plane(z_lens, z_source_1, z_source_2, cosmo, n_grid=1000)
 
 
 def beta2theta_e_ratio(beta_dsp, gamma_pl=2.0, lambda_mst=1.0):
@@ -249,12 +297,13 @@ class DSPLLikelihood:
     framework (it was the quadratic coefficient of the old linear model).
     """
 
-    def __init__(self, kwargs_likelihood_list, sampled_params, fixed_params, priors=None):
+    def __init__(self, kwargs_likelihood_list, sampled_params, fixed_params, priors=None, scatter_model_type="linear"):
         """
         Initializes the likelihood object by unpacking the list of mock dictionaries into numpy arrays.
         """
         self.sampled_params = sampled_params
         self.fixed_params   = fixed_params
+        self.scatter_model_type = scatter_model_type
 
         self.down_sampling      = np.array([d.get("down_sampling", 1.0) for d in kwargs_likelihood_list]).flatten()
         self.z_l                = np.array([d["z_lens"]    for d in kwargs_likelihood_list]).flatten()
@@ -336,18 +385,22 @@ class DSPLLikelihood:
 
         dy_dlam, dy_dgam = self.get_derivatives(beta_geo, p["lambda_int"], p["gamma_pl"], model_mu)
 
-        # OLD: Linear polynomial model
-        # ----------------------------------------------------------------------
-        # c0 = p.get('beta_c0', 0.0)
-        # c1 = p.get('beta_c1', 0.0)
-        # c2 = p.get('beta_c2', 0.0)
-        # sigma_beta_int_lens = c0 + c1 * self.dissimilarity + c2 * (self.dissimilarity**2)
+        c0 = p.get("beta_c0", 0.0)   # Floor or intercept
+        c1 = p.get("beta_c1", 0.0)   # Slope
+        c2 = p.get("beta_c2", 0.0)   # Quadratic extension (0 for standard linear)
 
-        # NEW: Quadrature summation
-        # Quadrature scatter model (consistent with quadrature fit in pairing.py)
-        c0 = p.get("beta_c0", 0.0)   # floor scatter
-        c1 = p.get("beta_c1", 0.0)   # dissimilarity slope
-        sigma_beta_int_lens = np.sqrt(c0 ** 2 + (c1 * self.dissimilarity) ** 2)
+        if self.scatter_model_type == "linear":
+            sigma_beta_int_lens = c0 + c1 * self.dissimilarity + c2 * (self.dissimilarity**2)
+        elif self.scatter_model_type == "quadrature":
+            sigma_beta_int_lens = np.sqrt(c0 ** 2 + (c1 * self.dissimilarity) ** 2)
+        elif self.scatter_model_type == "power_law":
+            sigma_beta_int_lens = (10 ** c0) * (self.dissimilarity ** c1)
+        else:
+            raise ValueError(f"Unknown scatter_model_type: '{self.scatter_model_type}'")
+
+        # Catch unphysical negative scatters in the linear model during MCMC exploration
+        if np.any(sigma_beta_int_lens < 0):
+            return -np.inf
 
         sigma_pop_sq = (
             (dy_dlam * p.get("lambda_sigma", 0.0)) ** 2
@@ -402,6 +455,7 @@ def run_dspl_inference(
     fixed_params=None,
     backend_path=None,
     num_cpus=None,
+    scatter_model_type="linear"
 ):
     """
     Run the emcee MCMC sampler for DSPL / PDSPL hierarchical inference.
@@ -444,7 +498,7 @@ def run_dspl_inference(
     if initial_scatter:
         default_scatter.update(initial_scatter)
 
-    like = DSPLLikelihood(kwargs_dspl_list, sampled_params, fixed_params, priors=priors)
+    like = DSPLLikelihood(kwargs_dspl_list, sampled_params, fixed_params, priors=priors, scatter_model_type=scatter_model_type)
 
     ndim = len(sampled_params)
     p0   = np.zeros((n_walkers, ndim))
@@ -498,3 +552,63 @@ def run_dspl_inference(
 
     labels = [latex_labels[n] for n in sampled_params]
     return flat_samples, labels
+
+
+def check_mcmc_convergence(scenarios_dict, param_labels, n_walkers=64):
+    """
+    Loops through a dictionary of forecast scenarios, unflattening the emcee 
+    samples to calculate and print the integrated autocorrelation time (tau) 
+    for convergence checks.
+
+    Parameters
+    ----------
+    scenarios_dict : dict
+        The dictionary containing scenario configurations and MCMC 'samples'.
+    param_labels : list of str
+        The list of LaTeX or text labels corresponding to the sampled parameters.
+    n_walkers : int, optional
+        The number of walkers used in the MCMC run. Default is 64.
+    """
+    print("=========================================================")
+    print("               MCMC CONVERGENCE REPORT                   ")
+    print("=========================================================")
+
+    for key, sc in scenarios_dict.items():
+        if "samples" not in sc or sc["samples"] is None:
+            continue
+
+        flat_samples = sc["samples"]
+        ndim = flat_samples.shape[1]
+        n_steps_kept = len(flat_samples) // n_walkers
+        
+        # Reshape back to [steps, walkers, parameters] for emcee
+        chain = flat_samples.reshape((n_steps_kept, n_walkers, ndim))
+
+        print(f"\nScenario: {sc['name']}")
+        print(f"Post-burn-in steps per walker: {n_steps_kept}")
+        print(f"{'Parameter':<25} | {'tau (steps)':<12} | {'Min Required':<15} | {'Status'}")
+        print("-" * 75)
+
+        try:
+            # tol=0 forces emcee to return an estimate even if the chain is short
+            tau = emcee.autocorr.integrated_time(chain, tol=0)
+            max_tau = np.max(tau)
+
+            for i, label in enumerate(param_labels):
+                # Clean up LaTeX formatting for clean console logging
+                clean_label = (label.replace('$', '')
+                                    .replace('\\', '')
+                                    .replace('rm ', '')
+                                    .replace('{', '')
+                                    .replace('}', ''))
+                min_steps = int(50 * tau[i])
+                status = "✓ OK" if n_steps_kept > min_steps else "! SHORT"
+                print(f"{clean_label:<25} | {tau[i]:<12.1f} | {min_steps:<15} | {status}")
+
+            if n_steps_kept > 50 * max_tau:
+                print(f"--> OVERALL STATUS: ✓ CONVERGED")
+            else:
+                print(f"--> OVERALL STATUS: ! WARNING: Unconverged (Needs {int(50*max_tau)} steps, has {n_steps_kept})")
+                
+        except Exception as e:
+            print(f"--> OVERALL STATUS: ERROR calculating tau: {e}")
