@@ -2,16 +2,6 @@
 
 """
 Unified toolkit for Double Source Plane Lens (DSPL) / Pseudo-DSPL (PDSPL) cosmology.
-
-Key design choices
-------------------
-* The scatter model in the *likelihood* uses the quadrature form:
-      σ_{β_E, D}(D) = sqrt(c0² + (c1·D)²)
-  This is consistent with the quadrature fit performed in ``pairing.py``.
-* Use ``pdspl_utils.pairing.eval_scatter_model`` to evaluate stored fit
-  coefficients when building mock datasets — do NOT use ``np.polyval``.
-* ``draw_lens_from_given_zs`` accepts ``sigma_beta_intrinsic`` as a plain
-  float, so simply pass the result of ``eval_scatter_model`` directly.
 """
 
 import os

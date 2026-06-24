@@ -380,12 +380,13 @@ def compute_dissimilarity(pairs_table, dissimilarity_keys, method="rms"):
 def plot_beta_E_vs_D_MC(
     pdspl_samples,
     mc_results,
-    fit_type="quadrature",
+    fit_type="linear",
     save_path=None,
     show_fit_eqn_label=True,
     custom_colors_dict=None,
     custom_markers_dict=None,
     plot_dissimilarity_range=(0, 0.1),
+    legend_fontsize=9,
 ):
     """
     Plot scatter of Δβ_E/β_E vs dissimilarity (left) and the MC-averaged
@@ -518,8 +519,8 @@ def plot_beta_E_vs_D_MC(
                 y_fit = np.polyval(coeffs, x_data)
                 slope, intercept = coeffs[0], coeffs[1]
                 eq_latex = (
-                    r"$y = (%.2f \pm %.2f) x + (%.3f \pm %.3f)$"
-                    % (slope, np.sqrt(cov[0, 0]), intercept, np.sqrt(cov[1, 1]))
+                    r"$\sigma_{\beta_{\rm E},\rm \mathcal{D}} = (%.2f \pm %.2f) \mathcal{D} + (%.3f \pm %.3f)$"
+                    % (slope, np.sqrt(cov[0, 0]), intercept, np.sqrt(cov[1, 1])) + r" $\rightarrow$ " + f"{s['name']}"
                 )
 
             elif fit_type == "power_law":
@@ -530,8 +531,8 @@ def plot_beta_E_vs_D_MC(
                 coeffs, cov = np.polyfit(log_x, log_y, 1, w=w, cov=True)
                 y_fit = 10 ** np.polyval(coeffs, log_x)
                 eq_latex = (
-                    r"$y = 10^{%.2f \pm %.2f} x^{%.2f \pm %.2f}$"
-                    % (coeffs[1], np.sqrt(cov[1, 1]), coeffs[0], np.sqrt(cov[0, 0]))
+                    r"$\sigma_{\beta_{\rm E},\rm \mathcal{D}} = 10^{%.2f \pm %.2f} \mathcal{D}^{%.2f \pm %.2f}$"
+                    % (coeffs[1], np.sqrt(cov[1, 1]), coeffs[0], np.sqrt(cov[0, 0])) + r" $\rightarrow$ " + f"{s['name']}"
                 )
 
             elif fit_type == "quadrature":
@@ -595,7 +596,7 @@ def plot_beta_E_vs_D_MC(
 
     if show_fit_eqn_label:
         ax_fit.legend(
-            frameon=True, fontsize=8,
+            frameon=True, fontsize=legend_fontsize,
             loc="lower left",
             bbox_to_anchor=(0.0, 1.01),
             borderaxespad=0.0,
@@ -1033,19 +1034,19 @@ def plot_pairing_scatter(
         # Force the histogram's height to exactly match the square scatter plot's height
         ax_hist.set_box_aspect(w_sc / w_hist)
         
-        ax_sc.set_xlabel(label_sc + r"$_{\,1}$",  fontsize=18)
-        ax_sc.set_ylabel(label_sc + r"$_{\,2}$",  fontsize=18)
-        ax_sc.tick_params(labelsize=14)
+        ax_sc.set_xlabel(label_sc + r"$_{\,1}$",  fontsize=19)
+        ax_sc.set_ylabel(label_sc + r"$_{\,2}$",  fontsize=19)
+        ax_sc.tick_params(labelsize=15)
         ax_sc.xaxis.set_major_locator(MaxNLocator(4))
         ax_sc.yaxis.set_major_locator(MaxNLocator(4))
         for sp in ax_sc.spines.values():
             sp.set_linewidth(1.0)
  
         ax_hist.axvline(0.0, color="#555555", linewidth=1.0, linestyle="--", zorder=3)
-        ax_hist.set_xlabel(label_hist, fontsize=18)
-        ax_hist.set_ylabel("density", fontsize=18)
+        ax_hist.set_xlabel(label_hist, fontsize=19)
+        ax_hist.set_ylabel("density", fontsize=19)
         ax_hist.set_xlim(reldiff_range)
-        ax_hist.tick_params(labelsize=14)
+        ax_hist.tick_params(labelsize=15)
         ax_hist.yaxis.set_major_locator(MaxNLocator(4))
         for sp in ax_hist.spines.values():
             sp.set_linewidth(1.0)
