@@ -1,7 +1,7 @@
 # Strong Lensing Tomography: DSPL and PDSPL Analysis
 
 <!-- [![arXiv](https://img.shields.io/badge/arXiv-XXXX.XXXXX-b31b1b.svg)](https://arxiv.org/abs/XXXX.XXXXX) -->
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+<!-- [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) -->
 
 This repository contains the analysis code, data pipelines, and figure generation scripts necessary to reproduce the results presented in the paper:
 
