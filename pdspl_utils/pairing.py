@@ -261,8 +261,8 @@ def get_pairs_table_PDSPL(data_table, pair_indices, cosmo):
     _beta_E_DSPL_D1 = beta_double_source_plane(pt["z_D_1"], pt["z_S1"], pt["z_S2"], cosmo)
     _beta_E_DSPL_D2 = beta_double_source_plane(pt["z_D_2"], pt["z_S1"], pt["z_S2"], cosmo)
 
-    beta_E_DSPL_D1 = beta2theta_e_ratio(_beta_E_DSPL_D1, gamma_pl=pt["gamma_pl_1"], lambda_mst=1)
-    beta_E_DSPL_D2 = beta2theta_e_ratio(_beta_E_DSPL_D2, gamma_pl=pt["gamma_pl_2"], lambda_mst=1)
+    beta_E_DSPL_D1 = beta2theta_e_ratio(_beta_E_DSPL_D1, gamma_pl=2.0, lambda_mst=1)
+    beta_E_DSPL_D2 = beta2theta_e_ratio(_beta_E_DSPL_D2, gamma_pl=2.0, lambda_mst=1)
 
     pt["beta_E_DSPL"]   = 0.5 * (beta_E_DSPL_D1 + beta_E_DSPL_D2)
     pt["beta_E_pseudo"] = pt["theta_E1"] / pt["theta_E2"]
