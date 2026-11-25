@@ -179,3 +179,20 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# ---------------------------------------------------------------------------
+# Large paper data products: archived on Zenodo, not in git
+# (https://doi.org/10.5281/zenodo.24539834). Most files exceed GitHub's 100 MB limit.
+# ---------------------------------------------------------------------------
+data/posteriors/forecast_w0waCDM_fixed_scatter/
+data/posteriors/forecast_w0waCDM_free_scatter/
+data/posteriors/expt_photoz_bias/
+data/posteriors/expt_photoz_precision/
+data/samples/
+joint-DESC-forecast-stuff/forecast_scenarios_*.pkl
+
+# Paper LaTeX drafts are kept local (files already tracked here stay tracked)
+paper-latex/
+
+# macOS
+.DS_Store
