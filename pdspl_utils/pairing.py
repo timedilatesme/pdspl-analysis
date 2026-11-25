@@ -616,6 +616,8 @@ def plot_dataset_corner(
     plot_ranges,
     save_path=None,
     custom_colors_dict=None,
+    labelpad=0.18,      # Fractional distance to push axis labels outward
+    max_n_ticks=4,      # Prevents tick numbers from colliding at subplot edges
 ):
     """
     Corner plot of the raw lens-population properties for multiple samples.
@@ -637,6 +639,9 @@ def plot_dataset_corner(
             plot_datapoints=False,
             fill_contours=True,
             levels=(0.68, 0.95),
+            label_kwargs={"fontsize": 22},  # Set label size directly in corner
+            labelpad=labelpad,              # Pushes x/y labels away from tick numbers
+            max_n_ticks=max_n_ticks,        # Reduces crowding along the axes
         )
 
         if fig_corner_ref is None:
@@ -664,7 +669,7 @@ def plot_dataset_corner(
     )
 
     for ax in fig_corner_ref.get_axes():
-        ax.tick_params(axis="both", which="major", labelsize=17, pad=8)
+        ax.tick_params(axis="both", which="major", labelsize=15, pad=8)
         ax.xaxis.label.set_size(22)
         ax.yaxis.label.set_size(22)
         ax.title.set_size(22)

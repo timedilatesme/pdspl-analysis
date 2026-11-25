@@ -18,7 +18,7 @@ from .pairing import (
 from .inference import (
     beta_double_source_plane,
     beta2theta_e_ratio,
-    get_beta_z_derivatives,
+    theta_e_ratio_derivatives,
     draw_lens_from_given_zs,
     DSPLLikelihood,
     run_dspl_inference,
@@ -45,7 +45,7 @@ __all__ = [
     # inference
     "beta_double_source_plane",
     "beta2theta_e_ratio",
-    "get_beta_z_derivatives",
+    "theta_e_ratio_derivatives",
     "draw_lens_from_given_zs",
     "DSPLLikelihood",
     "run_dspl_inference",
