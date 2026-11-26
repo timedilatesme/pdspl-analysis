@@ -1,0 +1,24 @@
+{
+  "sample": "lsst_y10",
+  "rule": "pair-first",
+  "balanced_cut": 0.031,
+  "n_lenses_total": 116471,
+  "n_pairs_total": 85837,
+  "cuts": {
+    "0.026": {
+      "n_pdspl_lenses": 34922,
+      "n_phil_lenses": 81549,
+      "n_pdspl_pairs": 20902
+    },
+    "0.031": {
+      "n_pdspl_lenses": 57749,
+      "n_phil_lenses": 58722,
+      "n_pdspl_pairs": 37346
+    },
+    "0.036": {
+      "n_pdspl_lenses": 77164,
+      "n_phil_lenses": 39307,
+      "n_pdspl_pairs": 52521
+    }
+  }
+}
